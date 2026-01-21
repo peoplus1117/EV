@@ -5,12 +5,13 @@ import os
 import re
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="2026 친환경차 조회", page_icon="⚡", layout="wide")
+# 브라우저 탭 제목에도 이름을 넣었습니다.
+st.set_page_config(page_title="2026 친환경차 현황 by 김희주", page_icon="⚡", layout="wide")
 
 # --- 스타일 설정 ---
 st.markdown("""
     <style>
-    /* 결과 박스 */
+    /* 결과 박스 스타일 */
     .result-container {
         background-color: var(--secondary-background-color);
         padding: 15px;
@@ -19,7 +20,7 @@ st.markdown("""
         border: 1px solid rgba(128, 128, 128, 0.2);
     }
     
-    /* 반응형 줄바꿈 */
+    /* 반응형 레이아웃 (줄바꿈 허용) */
     .car-info-line {
         display: flex;
         flex-wrap: wrap;            
@@ -41,6 +42,7 @@ st.markdown("""
         align-items: center;
     }
 
+    /* 항목 제목 (볼드 제거) */
     .label {
         font-weight: normal; 
         color: var(--primary-color);
@@ -48,6 +50,7 @@ st.markdown("""
         font-size: 0.9em;
     }
 
+    /* ★ 모델명만 유일하게 볼드 처리 */
     .model-name {
         font-weight: bold;    
         color: var(--text-color);
@@ -55,6 +58,7 @@ st.markdown("""
         margin-right: 5px;
     }
 
+    /* 연비/주행거리 강조 (색상만, 볼드 X) */
     .highlight {
         background-color: rgba(255, 255, 0, 0.2);
         color: #ff4b4b;
@@ -63,12 +67,13 @@ st.markdown("""
         border-radius: 3px;
     }
     
+    /* 일반 값 */
     .value-text {
         color: var(--text-color);
         font-weight: normal;
     }
 
-    /* ★ 판정 결과 배지 스타일 */
+    /* 판정 결과 배지 스타일 */
     .grade-badge-fail {
         background-color: #ffebee;
         color: #c62828;
@@ -90,7 +95,8 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.markdown("### 2026 친환경차(전기차) 등재 현황")
+# --- 메인 타이틀 (서명 포함) ---
+st.markdown("### 2026 친환경차(전기차) 등재 현황 by 김희주")
 
 # --- 기준표 ---
 with st.expander("ℹ️ [기준] 2026년 전기차 에너지 소비효율 기준", expanded=False):
@@ -117,15 +123,14 @@ def shorten_header(header):
     if "적용일자" in header: return "적용일"
     return header
 
-# --- ★ 핵심: 연비와 제외여부를 보고 등급 판정하는 함수 ---
+# 등급 판정 로직 (역추적 방식)
 def analyze_grade(efficiency_val, is_excluded):
     try:
         eff = float(efficiency_val)
     except:
-        return "" # 숫자가 아니면 판정 불가
+        return "" 
 
     if is_excluded:
-        # 제외된 경우: 어떤 기준에 미달했는지 역추적
         if eff < 3.4:
             return "<span class='grade-badge-fail'>대형(3.4) 미달</span>"
         elif 3.4 <= eff < 4.2:
@@ -135,7 +140,6 @@ def analyze_grade(efficiency_val, is_excluded):
         else:
             return "<span class='grade-badge-fail'>기준 미달</span>"
     else:
-        # 정상인 경우: 어떤 기준을 충족했는지 표시 (높은 등급 우선)
         if eff >= 5.0:
             return "<span class='grade-badge-pass'>소형(5.0) 충족</span>"
         elif eff >= 4.2:
@@ -143,8 +147,9 @@ def analyze_grade(efficiency_val, is_excluded):
         elif eff >= 3.4:
             return "<span class='grade-badge-pass'>대형(3.4) 충족</span>"
         else:
-            return "<span class='grade-badge-pass'>기준 예외/충족</span>"
+            return "<span class='grade-badge-pass'>기준 충족</span>"
 
+# 모델명 통합 로직
 def get_core_model_name(original_name, brand):
     if not isinstance(original_name, str): return str(original_name)
     name = original_name.upper()
@@ -153,11 +158,13 @@ def get_core_model_name(original_name, brand):
         name = name.replace(g, "")
     name = name.strip()
 
+    # 벤츠: EQ+알파벳 (EQB, EQE 등) 추출
     if brand == "메르세데스벤츠":
         match = re.search(r'(EQ[A-Z])', name)
         if match: return match.group(1)
         return name.split()[0] if name else original_name
 
+    # 현대/기아: EV시리즈, 아이오닉, GV시리즈
     if brand in ["기아", "현대자동차", "제네시스"]:
         if "EV" in name:
              match = re.search(r'(EV\s?\d+)', name)
@@ -170,15 +177,18 @@ def get_core_model_name(original_name, brand):
         for k in ["KONA", "코나", "NIRO", "니로", "RAY", "레이", "CASPER", "캐스퍼"]:
              if k in name: return k
 
+    # BMW: i로 시작하는 첫 단어
     if brand == "BMW":
         first = name.split()[0]
         if first.startswith("I"): return first
         
+    # 아우디
     if brand in ["Audi", "아우디"]:
         if "Q4" in name: return "Q4 e-tron"
         if "Q8" in name: return "Q8 e-tron"
         if name.startswith("E-TRON"): return "e-tron"
 
+    # 테슬라
     if brand == "테슬라" and "MODEL" in name:
         parts = name.split()
         try:
@@ -186,6 +196,7 @@ def get_core_model_name(original_name, brand):
             if idx + 1 < len(parts): return f"MODEL {parts[idx+1]}"
         except: pass
 
+    # 폴스타
     if brand == "폴스타" and "POLESTAR" in name:
         parts = name.split()
         try:
@@ -193,8 +204,10 @@ def get_core_model_name(original_name, brand):
              if idx+1 < len(parts): return f"POLESTAR {parts[idx+1]}"
         except: pass
 
+    # 폭스바겐
     if brand == "폭스바겐" and "ID." in name: return name.split()[0]
 
+    # 공통: 수식어 제거
     remove_suffixes = ["LONG RANGE", "LONGRANGE", "STANDARD", "PERFORMANCE", "2WD", "4WD", "AWD", "RWD", "FWD", "GT-LINE", "GT", "PRO", "PRIME"]
     for w in remove_suffixes: name = name.replace(w, "")
     
@@ -234,8 +247,10 @@ else:
         filtered_models = set()
         for idx, row in brand_df.iterrows():
             orig_name = str(row.iloc[1])
+            # 상용차 제외
             if selected_brand == "현대자동차" and ("포터" in orig_name or "ST1" in orig_name): continue
             if selected_brand == "기아" and ("봉고" in orig_name): continue
+            
             filtered_models.add(get_core_model_name(orig_name, selected_brand))
         display_models = sorted(list(filtered_models))
     
@@ -268,30 +283,28 @@ else:
                 vals = row.iloc[2:8].tolist()
                 
                 parts = []
-                # 1. 모델명
+                # 모델명 (볼드)
                 parts.append(f"<div class='info-item'><span class='label'>모델:</span><span class='model-name'>{display_name}</span></div>")
                 
-                # 연비 값 찾기 (판정용)
                 eff_val = 0
-                
                 for h, v in zip(headers, vals):
                     val_str = v.strftime("%Y-%m-%d") if isinstance(v, datetime.datetime) else format_value(v)
                     short_h = shorten_header(h)
                     
                     if "효율" in short_h or "주행" in short_h:
                         parts.append(f"<div class='info-item'><span class='label'>{short_h}:</span><span class='highlight'>{val_str}</span></div>")
-                        if "효율" in short_h: eff_val = v # 연비 저장
+                        if "효율" in short_h: eff_val = v 
                     else:
                         parts.append(f"<div class='info-item'><span class='label'>{short_h}:</span><span class='value-text'>{val_str}</span></div>")
                 
-                # ★ 마지막에 판정 배지 추가
+                # 판정 배지
                 grade_badge = analyze_grade(eff_val, is_excluded)
                 if grade_badge:
                     parts.append(f"<div class='info-item'>{grade_badge}</div>")
                 
                 return "<div class='car-info-line'>" + "".join(parts) + "</div>"
 
-            # 1. 제외된 차량
+            # 1. 제외된 차량 (그룹핑)
             if not excluded_df.empty:
                 excluded_df['제외일_str'] = excluded_df['제외일자_raw'].apply(
                     lambda x: x.strftime("%Y-%m-%d") if isinstance(x, datetime.datetime) else str(x).split(" ")[0]
