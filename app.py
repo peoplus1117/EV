@@ -10,7 +10,7 @@ st.set_page_config(page_title="2026 친환경차 조회", page_icon="⚡", layou
 # --- 스타일 설정 ---
 st.markdown("""
     <style>
-    /* 결과 박스 스타일 */
+    /* 결과 박스 */
     .result-container {
         background-color: var(--secondary-background-color);
         padding: 15px;
@@ -19,7 +19,7 @@ st.markdown("""
         border: 1px solid rgba(128, 128, 128, 0.2);
     }
     
-    /* 반응형 레이아웃 */
+    /* 반응형 줄바꿈 */
     .car-info-line {
         display: flex;
         flex-wrap: wrap;            
@@ -41,35 +41,51 @@ st.markdown("""
         align-items: center;
     }
 
-    /* [수정] 항목 제목: 볼드 제거 */
     .label {
-        font-weight: normal;  /* 볼드 아님 */
+        font-weight: normal; 
         color: var(--primary-color);
         margin-right: 4px;
         font-size: 0.9em;
     }
 
-    /* [수정] 모델명: 유일하게 볼드 유지 */
     .model-name {
-        font-weight: bold;    /* ★ 여기만 볼드 */
+        font-weight: bold;    
         color: var(--text-color);
         font-size: 1.05em;
         margin-right: 5px;
     }
 
-    /* [수정] 연비 강조: 볼드 제거, 색상만 유지 */
     .highlight {
         background-color: rgba(255, 255, 0, 0.2);
         color: #ff4b4b;
-        font-weight: normal;  /* 볼드 아님 */
+        font-weight: normal;
         padding: 1px 4px;
         border-radius: 3px;
     }
     
-    /* 일반 값 */
     .value-text {
         color: var(--text-color);
         font-weight: normal;
+    }
+
+    /* ★ 판정 결과 배지 스타일 */
+    .grade-badge-fail {
+        background-color: #ffebee;
+        color: #c62828;
+        border: 1px solid #c62828;
+        font-size: 0.85em;
+        padding: 2px 6px;
+        border-radius: 12px;
+        font-weight: bold;
+    }
+    .grade-badge-pass {
+        background-color: #e8f5e9;
+        color: #2e7d32;
+        border: 1px solid #2e7d32;
+        font-size: 0.85em;
+        padding: 2px 6px;
+        border-radius: 12px;
+        font-weight: bold;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -100,6 +116,34 @@ def shorten_header(header):
     if "구동방식" in header: return "구동"
     if "적용일자" in header: return "적용일"
     return header
+
+# --- ★ 핵심: 연비와 제외여부를 보고 등급 판정하는 함수 ---
+def analyze_grade(efficiency_val, is_excluded):
+    try:
+        eff = float(efficiency_val)
+    except:
+        return "" # 숫자가 아니면 판정 불가
+
+    if is_excluded:
+        # 제외된 경우: 어떤 기준에 미달했는지 역추적
+        if eff < 3.4:
+            return "<span class='grade-badge-fail'>대형(3.4) 미달</span>"
+        elif 3.4 <= eff < 4.2:
+            return "<span class='grade-badge-fail'>중형(4.2) 미달</span>"
+        elif 4.2 <= eff < 5.0:
+            return "<span class='grade-badge-fail'>소형(5.0) 미달</span>"
+        else:
+            return "<span class='grade-badge-fail'>기준 미달</span>"
+    else:
+        # 정상인 경우: 어떤 기준을 충족했는지 표시 (높은 등급 우선)
+        if eff >= 5.0:
+            return "<span class='grade-badge-pass'>소형(5.0) 충족</span>"
+        elif eff >= 4.2:
+            return "<span class='grade-badge-pass'>중형(4.2) 충족</span>"
+        elif eff >= 3.4:
+            return "<span class='grade-badge-pass'>대형(3.4) 충족</span>"
+        else:
+            return "<span class='grade-badge-pass'>기준 예외/충족</span>"
 
 def get_core_model_name(original_name, brand):
     if not isinstance(original_name, str): return str(original_name)
@@ -218,25 +262,32 @@ else:
             excluded_df = target_df[target_df['제외일자_raw'].notna() & (target_df['제외일자_raw'].astype(str).str.strip() != "")]
             normal_df = target_df[~target_df.index.isin(excluded_df.index)]
 
-            def make_html_line(row):
+            def make_html_line(row, is_excluded):
                 orig_name = row.iloc[1]
                 display_name = orig_name.replace("The New", "").replace("Mercedes-Benz", "").strip()
                 vals = row.iloc[2:8].tolist()
                 
                 parts = []
-                # 모델명 (볼드)
+                # 1. 모델명
                 parts.append(f"<div class='info-item'><span class='label'>모델:</span><span class='model-name'>{display_name}</span></div>")
+                
+                # 연비 값 찾기 (판정용)
+                eff_val = 0
                 
                 for h, v in zip(headers, vals):
                     val_str = v.strftime("%Y-%m-%d") if isinstance(v, datetime.datetime) else format_value(v)
                     short_h = shorten_header(h)
                     
                     if "효율" in short_h or "주행" in short_h:
-                        # 강조 값 (볼드 아님)
                         parts.append(f"<div class='info-item'><span class='label'>{short_h}:</span><span class='highlight'>{val_str}</span></div>")
+                        if "효율" in short_h: eff_val = v # 연비 저장
                     else:
-                        # 일반 값 (볼드 아님)
                         parts.append(f"<div class='info-item'><span class='label'>{short_h}:</span><span class='value-text'>{val_str}</span></div>")
+                
+                # ★ 마지막에 판정 배지 추가
+                grade_badge = analyze_grade(eff_val, is_excluded)
+                if grade_badge:
+                    parts.append(f"<div class='info-item'>{grade_badge}</div>")
                 
                 return "<div class='car-info-line'>" + "".join(parts) + "</div>"
 
@@ -253,7 +304,7 @@ else:
                         st.markdown(f"**📅 제외일: {date_str}** ({len(group)}대)")
                         html_content = "<div class='result-container'>"
                         for _, row in group.iterrows():
-                            html_content += make_html_line(row)
+                            html_content += make_html_line(row, is_excluded=True)
                         html_content += "</div>"
                         st.markdown(html_content, unsafe_allow_html=True)
 
@@ -263,7 +314,7 @@ else:
                 st.success(f"✅ [기준 충족/정상] - 총 {len(normal_df)}건")
                 html_content = "<div class='result-container'>"
                 for _, row in normal_df.iterrows():
-                    html_content += make_html_line(row)
+                    html_content += make_html_line(row, is_excluded=False)
                 html_content += "</div>"
                 st.markdown(html_content, unsafe_allow_html=True)
         else:
