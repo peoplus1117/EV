@@ -115,12 +115,13 @@ def get_core_model_name(original_name, brand):
     name = original_name.upper()
     name = re.sub(r'\(.*?\)', '', name)
     
-    # 불필요한 단어 제거
+    # 1. 브랜드 이름 등 불필요한 단어 제거 (BYD 추가 완료)
     garbage_words = [
         "THE NEW", "ALL NEW", "FACELIFT", 
         "MERCEDES-BENZ", "MERCEDES", "BENZ",
         "CHEVROLET", "쉐보레",
-        "VOLVO", "볼보"
+        "VOLVO", "볼보",
+        "BYD"  # ★ BYD 추가
     ]
     for g in garbage_words:
         name = name.replace(g, "")
@@ -128,7 +129,7 @@ def get_core_model_name(original_name, brand):
     name = name.strip()
     if not name: return None
 
-    # 브랜드별 키워드
+    # 2. 브랜드별 키워드
     if brand == "메르세데스벤츠":
         match = re.search(r'(EQ[A-Z])', name)
         if match: return match.group(1)
@@ -171,7 +172,7 @@ def get_core_model_name(original_name, brand):
 
     if brand == "폭스바겐" and "ID." in name: return name.split()[0]
 
-    # 공통 접미사 제거
+    # 3. 공통 접미사 제거
     remove_suffixes = ["LONG RANGE", "LONGRANGE", "STANDARD", "PERFORMANCE", "2WD", "4WD", "AWD", "RWD", "FWD", "GT-LINE", "GT", "PRO", "PRIME", "EUV", "EV"]
     for w in remove_suffixes:
         name = name.replace(w, "")
@@ -207,7 +208,6 @@ else:
     existing_brands = df.iloc[:, 0].dropna().astype(str).unique().tolist()
     sorted_brands = [b for b in allowed_brands if b in existing_brands]
 
-    # 헤더 정의 (미리 해둬야 에러 안 남)
     headers = df.columns[2:8].tolist()
 
     col1, col2 = st.columns(2)
@@ -222,7 +222,7 @@ else:
     if selected_brand != "선택하세요":
         brand_df = df[df.iloc[:, 0] == selected_brand].copy()
         
-        # [수정] 제외일자 컬럼을 미리 생성 (KeyError 방지)
+        # 제외일자 컬럼 생성
         brand_df['제외일자_raw'] = brand_df.iloc[:, 8]
 
         # 모델명 추출
@@ -248,7 +248,6 @@ else:
     st.markdown("---") 
 
     if selected_brand != "선택하세요":
-        # 타겟 데이터 설정
         if selected_display_model == "전체 보기":
             target_df = brand_df
         else:
@@ -256,12 +255,10 @@ else:
         
         if not target_df.empty:
             
-            # --- 등급 기준(Threshold) 계산 ---
-            # 계산용 DF는 전체 데이터(brand_df)를 사용해야 그룹 전체 기준을 알 수 있음
+            # 기준 계산
             calc_df = brand_df 
             
             for model_name, group in calc_df.groupby('Core_Model'):
-                # 정상 차량만 추출
                 alive_mask = ~(group['제외일자_raw'].notna() & (group['제외일자_raw'].astype(str).str.strip() != ""))
                 alive_group = group[alive_mask]
                 
@@ -281,7 +278,7 @@ else:
                 
                 model_threshold_map[model_name] = (c_name, c_th)
 
-            # --- 데이터 분리 ---
+            # 데이터 분리
             excluded_mask = target_df['제외일자_raw'].notna() & (target_df['제외일자_raw'].astype(str).str.strip() != "")
             excluded_df = target_df[excluded_mask]
             normal_df = target_df[~excluded_mask]
@@ -289,15 +286,14 @@ else:
             def make_html_line(row, is_excluded):
                 core_model = row['Core_Model']
                 orig_name = row.iloc[1]
-                # 화면 표시용 이름 정제
+                # 화면 표시용 이름 정제 (BYD 추가)
                 display_name = str(orig_name)
-                for g in ["The New", "All New", "Mercedes-Benz", "MERCEDES-BENZ", "CHEVROLET", "Chevrolet", "Volvo", "VOLVO"]:
+                for g in ["The New", "All New", "Mercedes-Benz", "MERCEDES-BENZ", "CHEVROLET", "Chevrolet", "Volvo", "VOLVO", "BYD"]:
                     display_name = display_name.replace(g, "")
                 display_name = display_name.strip()
                 
                 vals = row.iloc[2:8].tolist()
                 
-                # 모델별 기준 가져오기
                 detected_class, detected_th = model_threshold_map.get(core_model, ("중형", 4.2))
 
                 parts = []
