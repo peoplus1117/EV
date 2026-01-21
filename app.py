@@ -6,34 +6,45 @@ import os
 # --- 페이지 설정 ---
 st.set_page_config(page_title="2026 친환경차 조회", page_icon="⚡", layout="centered")
 
-# --- 커스텀 CSS ---
+# --- 스타일 설정 (글씨 크기, 정렬 등) ---
 st.markdown("""
     <style>
-    th, td {
-        text-align: center !important;
-        vertical-align: middle !important;
+    /* 결과 박스 스타일 */
+    .info-box {
+        text-align: center;
+        background-color: #f0f2f6;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 10px;
+        font-size: 15px;
+        line-height: 1.8;
     }
-    table {
-        width: 100%;
-        border-collapse: collapse;
+    /* 항목(헤더) 스타일 */
+    .info-header {
+        font-weight: bold;
+        color: #333;
+    }
+    /* 구분선 스타일 */
+    .separator {
+        color: #ccc;
+        margin: 0 8px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 1. 제목 수정 (작게, 이모티콘 제거) ---
+# --- 1. 제목 (작게, 이모티콘 제거) ---
 st.markdown("### 2026 친환경차(전기차) 등재 현황")
 st.write("업체명과 모델명을 선택하여 제외 여부를 확인하세요.")
 
-# --- 2. 이미지 내용 추가 (기준표 정리) ---
+# --- 2. 기준표 (이미지 내용 정리) ---
 with st.expander("ℹ️ [참고] 전기자동차 에너지 소비효율 기준 보기", expanded=False):
-    st.markdown("**3. 전기자동차의 기준 (승용자동차)**")
-    
     # 보기 편하게 행/열을 바꿔서(Transposed) 표 생성
     ref_data = {
         "구분 (차급)": ["초소·경·소형", "중형", "대형"],
-        "에너지 소비효율 (km/kWh)": ["5.0 이상", "4.2 이상", "3.4 이상"]
+        "기준 (km/kWh)": ["5.0 이상", "4.2 이상", "3.4 이상"]
     }
-    st.table(pd.DataFrame(ref_data))
+    # 인덱스 숨기고 표 출력
+    st.table(pd.DataFrame(ref_data).set_index("구분 (차급)"))
 
 st.divider()
 
@@ -115,14 +126,24 @@ else:
             else:
                 normal_rows.append(row)
 
-        # 공통: 테이블 HTML 생성 함수
-        def make_html_table(rows):
-            data_list = []
-            for r in rows:
-                data_list.append([format_value(v) for v in r.iloc[2:8].tolist()])
+        # ★ 핵심 기능: 정보를 한 줄로 합쳐주는 함수
+        def make_one_line_html(row):
+            items = []
+            vals = row.iloc[2:8].tolist()
             
-            temp_df = pd.DataFrame(data_list, columns=headers)
-            return temp_df.to_html(index=False, classes='table', escape=False)
+            for h, v in zip(headers, vals):
+                # H열(마지막) 시간 포맷 한번 더 체크
+                if isinstance(v, datetime.datetime):
+                    v_str = v.strftime("%Y-%m-%d")
+                else:
+                    v_str = format_value(v)
+                
+                # 항목: 값 형태로 만들기
+                items.append(f"<span class='info-header'>{h}:</span> {v_str}")
+            
+            # 슬래시(/)나 파이프(|)로 연결
+            full_str = "<span class='separator'> / </span>".join(items)
+            return f"<div class='info-box'>{full_str}</div>"
 
         # 1. 제외된 차량
         if excluded_rows:
@@ -131,8 +152,8 @@ else:
                 ex_val = row.iloc[8]
                 ex_date = ex_val.strftime("%Y-%m-%d") if isinstance(ex_val, datetime.datetime) else str(ex_val).split(" ")[0]
                 
-                st.markdown(f"**🔻 제외 상세 정보 #{i+1} (제외일: {ex_date})**")
-                st.markdown(make_html_table([row]), unsafe_allow_html=True)
+                st.markdown(f"**🔻 제외 정보 #{i+1} (제외일: {ex_date})**")
+                st.markdown(make_one_line_html(row), unsafe_allow_html=True)
 
         # 2. 정상 차량
         if normal_rows:
@@ -140,7 +161,7 @@ else:
             st.success(f"✅ [정상 등재] - {len(normal_rows)}건")
             for i, row in enumerate(normal_rows):
                 st.markdown(f"**🔹 상세 제원 #{i+1}**")
-                st.markdown(make_html_table([row]), unsafe_allow_html=True)
+                st.markdown(make_one_line_html(row), unsafe_allow_html=True)
 
         if not excluded_rows and not normal_rows:
             st.warning("데이터 오류")
