@@ -40,7 +40,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.markdown("### 2026 친환경차(전기차) 등재 현황")
-st.write("2026년 효율 기준 변경에 따른 제외/정상 여부를 확인하세요.")
+st.write("모델명 단순화 및 통합 검색 기능이 적용되었습니다.")
 
 # --- 기준표 ---
 with st.expander("ℹ️ [기준] 2026년 전기차 에너지 소비효율 기준", expanded=False):
@@ -58,51 +58,61 @@ def format_value(val):
     if isinstance(val, datetime.datetime): return val.strftime("%Y-%m-%d")
     return val
 
-# --- ★ 핵심: 브랜드별 맞춤형 모델명 단순화 ---
+# --- ★ 핵심: 더 강력해진 단순화 로직 ---
 def simplify_name(name, brand):
     if not isinstance(name, str): return str(name)
     
-    # 1. 공통: 괄호 및 내용 제거
+    # 1. 공통 전처리: 대문자 변환, 괄호 제거
+    name = name.upper()
     name = re.sub(r'\(.*?\)', '', name).strip()
-    upper_name = name.upper()
 
-    # 2. 브랜드별 네이밍 전략 적용
-    
-    # [전략 A] 독일 3사: 첫 단어가 곧 모델명 (파워트레인 제거)
-    # 예: "i4 eDrive40" -> "i4", "EQE 350+" -> "EQE"
-    if brand in ["BMW", "메르세데스벤츠", "Audi", "폭스바겐", "볼보"]:
-        # 공백으로 쪼개서 첫 번째 단어만 가져옴
-        first_word = upper_name.split()[0]
-        # 예외처리: Audi e-tron 같은 경우 유지, Q4 e-tron은 Q4로? 
-        # 아우디는 'Q4', 'e-tron', 'Q8' 등으로 나뉨. 첫단어가 가장 깔끔함.
-        return first_word
+    # 2. [벤츠] 브랜드명 중복 제거 (가장 중요!)
+    if brand == "메르세데스벤츠":
+        # 모델명에 있는 'MERCEDES-BENZ' 또는 'MERCEDES' 삭제
+        name = name.replace("MERCEDES-BENZ", "").replace("MERCEDES", "").strip()
+        # 남은 것 중 첫 단어만 가져옴 (예: "EQE 350+" -> "EQE")
+        if name: return name.split()[0]
+        return name
 
-    # [전략 B] 테슬라: "Model" + "X" 까지 가져옴
+    # 3. [기아/현대] EV 시리즈 및 아이오닉 강제 통합
+    if brand in ["기아", "현대자동차"]:
+        # EV + 숫자 패턴 찾기 (예: EV3, EV6, EV9)
+        ev_match = re.match(r'(EV\s?\d+)', name)
+        if ev_match:
+            # EV3 GT-Line이든 뭐든 그냥 "EV3"로 리턴
+            return ev_match.group(1).replace(" ", "")
+        
+        # 아이오닉 + 숫자 패턴 찾기
+        ioniq_match = re.match(r'(IONIQ\s?\d+)', name.replace("아이오닉", "IONIQ"))
+        if ioniq_match:
+            return ioniq_match.group(1).replace(" ", "") # IONIQ5 로 통일
+
+    # 4. [BMW/아우디/폭스바겐/볼보] 첫 단어 전략
+    if brand in ["BMW", "Audi", "폭스바겐", "볼보", "폴스타"]:
+        # i4 eDrive40 -> i4
+        # Q4 e-tron -> Q4 (아우디는 보통 앞단어가 시리즈명)
+        return name.split()[0]
+
+    # 5. [테슬라] MODEL + 명칭 유지
     if brand == "테슬라":
-        if upper_name.startswith("MODEL"):
-            parts = upper_name.split()
-            if len(parts) >= 2:
-                return f"{parts[0]} {parts[1]}" # MODEL 3, MODEL Y
-        return upper_name
+        if name.startswith("MODEL"):
+            parts = name.split()
+            if len(parts) >= 2: return f"{parts[0]} {parts[1]}" # MODEL 3
+        return name
 
-    # [전략 C] 국산차 및 기타: 불필요한 수식어 제거
+    # 6. [기타 일반적인 경우] 잡다한 수식어 제거 후 첫 단어 사용
     remove_words = [
         "LONG RANGE", "LONGRANGE", "STANDARD", "PERFORMANCE", 
-        "2WD", "4WD", "AWD", "RWD", "FWD", 
-        "PRESTIGE", "EXCLUSIVE", "SIGNATURE", "GT-LINE", "GT", 
-        "THE NEW", "ALL NEW", "PE", "ELECTRIC", "EV"
+        "2WD", "4WD", "AWD", "RWD", "FWD", "GT-LINE", "GT", "PRO", "PRIME"
     ]
+    for w in remove_words:
+        name = name.replace(w, "")
     
-    for word in remove_words:
-        if word == "EV": 
-            # EV는 단독 단어일 때만 제거 (NIRO EV -> NIRO)
-            upper_name = re.sub(r'\bEV\b', '', upper_name)
-        else:
-            upper_name = upper_name.replace(word, "")
-            
-    clean_name = upper_name.strip()
-    if len(clean_name) < 2: return name.split()[0]
-    return clean_name.strip()
+    clean_name = name.strip()
+    if not clean_name: return name # 다 지워졌으면 원본 리턴
+    
+    # 안전하게 첫 단어만 반환 (코란도 이모션 -> 코란도)
+    return clean_name.split()[0]
 
 # --- 데이터 로드 ---
 @st.cache_data
@@ -120,9 +130,7 @@ def load_data():
             
     if file_to_load:
         try:
-            df = pd.read_excel(file_to_load, sheet_name=sheet_name)
-            # 여기서는 원본만 로드하고, 단순화는 선택된 브랜드에 따라 실시간으로 처리
-            return df
+            return pd.read_excel(file_to_load, sheet_name=sheet_name)
         except: return None
     return None
 
@@ -144,28 +152,23 @@ else:
 
     col1, col2 = st.columns(2)
     with col1:
-        # 브랜드 선택 (기본값: 선택하세요)
         selected_brand = st.selectbox("1. 업체명 선택", ["선택하세요"] + sorted_brands)
     
     display_models = []
     
-    # [UX 개선] 업체 선택 시 모델명 리스트 즉시 생성
     if selected_brand != "선택하세요":
         brand_df = df[df.iloc[:, 0] == selected_brand]
         
-        # (단순화된 이름, 원본 이름) 추출 -> 이때 브랜드를 넘겨줌
-        pairs = []
+        # 단순화 로직 적용 및 필터링
+        filtered_models = set()
+        
         for idx, row in brand_df.iterrows():
             orig_name = str(row.iloc[1])
-            simple = simplify_name(orig_name, selected_brand) # 브랜드별 로직 적용
-            pairs.append((simple, orig_name))
-        
-        filtered_models = set()
-        for simple_name, orig_name in pairs:
-            orig_str = str(orig_name)
-            # 상용차 필터
-            if selected_brand == "현대자동차" and ("포터" in orig_str or "ST1" in orig_str): continue
-            if selected_brand == "기아" and ("봉고" in orig_str): continue
+            simple_name = simplify_name(orig_name, selected_brand)
+            
+            # 상용차 필터링
+            if selected_brand == "현대자동차" and ("포터" in orig_name or "ST1" in orig_name): continue
+            if selected_brand == "기아" and ("봉고" in orig_name): continue
             
             filtered_models.add(simple_name)
         
@@ -173,8 +176,6 @@ else:
         display_models = sorted(list(filtered_models))
     
     with col2:
-        # [UX 개선] 모델명 선택 박스에서 "선택하세요" 제거
-        # 업체가 선택되었다면 바로 모델 리스트를 보여줌 (첫 번째 모델 자동 선택)
         if selected_brand == "선택하세요":
             st.selectbox("2. 모델명 선택", ["업체를 먼저 선택하세요"], disabled=True)
             selected_display_model = None
@@ -190,20 +191,18 @@ else:
     # --- 결과 출력 ---
     if selected_brand != "선택하세요" and selected_display_model:
         
-        # 선택된 단순 모델명에 해당하는 '모든 원본 모델' 찾기
+        # 선택된 단순 모델명과 일치하는 원본 데이터 찾기
         brand_df = df[df.iloc[:, 0] == selected_brand]
         target_rows = []
         
         for idx, row in brand_df.iterrows():
             orig_name = str(row.iloc[1])
-            # 현재 선택된 브랜드의 로직으로 이름을 단순화해서 비교
+            # 원본 이름을 똑같은 로직으로 단순화해서 비교
             if simplify_name(orig_name, selected_brand) == selected_display_model:
                 target_rows.append(row)
         
-        # DataFrame으로 변환
         if target_rows:
             target_df = pd.DataFrame(target_rows)
-            
             headers = df.columns[2:8].tolist()
             excluded_rows = [] 
             normal_rows = []
@@ -240,7 +239,6 @@ else:
                 for i, row in enumerate(excluded_rows):
                     ex_val = row.iloc[8]
                     ex_date = ex_val.strftime("%Y-%m-%d") if isinstance(ex_val, datetime.datetime) else str(ex_val).split(" ")[0]
-                    
                     st.markdown(f"**🔻 제외 정보 #{i+1} (제외일: {ex_date})**")
                     st.markdown(make_one_line_html(row), unsafe_allow_html=True)
 
@@ -251,8 +249,9 @@ else:
                 for i, row in enumerate(normal_rows):
                     st.markdown(f"**🔹 등재 상세 #{i+1}**")
                     st.markdown(make_one_line_html(row), unsafe_allow_html=True)
-
+            
             if not excluded_rows and not normal_rows:
                 st.warning("데이터 오류")
+
         else:
             st.warning("해당 모델 데이터를 찾을 수 없습니다.")
