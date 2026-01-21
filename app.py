@@ -6,44 +6,54 @@ import os
 # --- 페이지 설정 ---
 st.set_page_config(page_title="2026 친환경차 조회", page_icon="⚡", layout="centered")
 
-# --- 스타일 설정 (글씨 크기, 정렬 등) ---
+# --- 스타일 설정 (다크모드/라이트모드 자동 호환) ---
 st.markdown("""
     <style>
-    /* 결과 박스 스타일 */
+    /* 결과 박스: 테마에 따라 배경색과 글자색이 자동 변환되는 변수(var) 사용 */
     .info-box {
         text-align: center;
-        background-color: #f0f2f6;
+        /* Streamlit 기본 보조 배경색 사용 (다크모드에선 어둡게, 라이트모드에선 밝게) */
+        background-color: var(--secondary-background-color);
+        /* 기본 텍스트 색상 */
+        color: var(--text-color);
         padding: 15px;
         border-radius: 10px;
         margin-bottom: 10px;
         font-size: 15px;
         line-height: 1.8;
+        /* 은은한 테두리 */
+        border: 1px solid rgba(128, 128, 128, 0.2);
     }
-    /* 항목(헤더) 스타일 */
+    
+    /* 항목(헤더) 강조 색상: 테마의 포인트 컬러(Primary Color) 사용 */
     .info-header {
         font-weight: bold;
-        color: #333;
+        color: var(--primary-color); 
     }
-    /* 구분선 스타일 */
+    
+    /* 구분선 색상 */
     .separator {
-        color: #ccc;
+        opacity: 0.3;
         margin: 0 8px;
+    }
+    
+    /* 기준표 테이블 텍스트 정렬 */
+    th, td {
+        text-align: center !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 1. 제목 (작게, 이모티콘 제거) ---
+# --- 1. 제목 (작게) ---
 st.markdown("### 2026 친환경차(전기차) 등재 현황")
 st.write("업체명과 모델명을 선택하여 제외 여부를 확인하세요.")
 
-# --- 2. 기준표 (이미지 내용 정리) ---
+# --- 2. 기준표 ---
 with st.expander("ℹ️ [참고] 전기자동차 에너지 소비효율 기준 보기", expanded=False):
-    # 보기 편하게 행/열을 바꿔서(Transposed) 표 생성
     ref_data = {
         "구분 (차급)": ["초소·경·소형", "중형", "대형"],
         "기준 (km/kWh)": ["5.0 이상", "4.2 이상", "3.4 이상"]
     }
-    # 인덱스 숨기고 표 출력
     st.table(pd.DataFrame(ref_data).set_index("구분 (차급)"))
 
 st.divider()
@@ -105,7 +115,7 @@ else:
     with col2:
         selected_model = st.selectbox("2. 모델명 선택", ["선택하세요"] + models)
 
-    st.markdown("---") # 구분선
+    st.markdown("---") 
 
     # --- 결과 출력 ---
     if selected_brand != "선택하세요" and selected_model != "선택하세요":
@@ -126,22 +136,20 @@ else:
             else:
                 normal_rows.append(row)
 
-        # ★ 핵심 기능: 정보를 한 줄로 합쳐주는 함수
+        # ★ 한 줄 정보 HTML 생성 (다크모드 호환)
         def make_one_line_html(row):
             items = []
             vals = row.iloc[2:8].tolist()
             
             for h, v in zip(headers, vals):
-                # H열(마지막) 시간 포맷 한번 더 체크
                 if isinstance(v, datetime.datetime):
                     v_str = v.strftime("%Y-%m-%d")
                 else:
                     v_str = format_value(v)
                 
-                # 항목: 값 형태로 만들기
+                # 항목 명에 강조 클래스 적용
                 items.append(f"<span class='info-header'>{h}:</span> {v_str}")
             
-            # 슬래시(/)나 파이프(|)로 연결
             full_str = "<span class='separator'> / </span>".join(items)
             return f"<div class='info-box'>{full_str}</div>"
 
