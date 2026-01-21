@@ -36,7 +36,6 @@ st.markdown("""
         opacity: 0.3;
         margin: 0 8px;
     }
-    th, td { text-align: center !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -44,9 +43,9 @@ st.markdown("### 2026 친환경차(전기차) 등재 현황")
 st.write("2026년 효율 기준 변경에 따른 제외/정상 여부를 확인하세요.")
 
 # --- 기준표 ---
-with st.expander("ℹ️ [기준] 2026년 전기차 에너지 소비효율 기준 (이보다 낮으면 제외됨)", expanded=False):
+with st.expander("ℹ️ [기준] 2026년 전기차 에너지 소비효율 기준", expanded=False):
     ref_data = {
-        "구분 (차급)": ["초소·경·소형", "중형 (가장 흔함)", "대형"],
+        "구분 (차급)": ["초소·경·소형", "중형", "대형"],
         "기준 (km/kWh)": ["5.0 이상", "4.2 이상", "3.4 이상"]
     }
     st.table(pd.DataFrame(ref_data).set_index("구분 (차급)"))
@@ -59,11 +58,44 @@ def format_value(val):
     if isinstance(val, datetime.datetime): return val.strftime("%Y-%m-%d")
     return val
 
-def normalize_name(name):
+# --- ★ 핵심: 모델명 '과격한' 단순화 함수 ---
+def simplify_name(name):
     if not isinstance(name, str): return str(name)
+    
+    # 1. 괄호 제거
     name = re.sub(r'\(.*?\)', '', name)
-    name = name.replace(" ", "")
-    return name.upper()
+    
+    # 2. 불필요한 수식어 제거 (롱레인지, 4WD, 스탠다드 등)
+    #    목록을 계속 추가해서 걸러낼 수 있습니다.
+    remove_words = [
+        "LONG RANGE", "LONGRANGE", "STANDARD", "PERFORMANCE", 
+        "2WD", "4WD", "AWD", "RWD", "FWD", 
+        "PRESTIGE", "EXCLUSIVE", "SIGNATURE", "GT-LINE", "GT", 
+        "THE NEW", "ALL NEW", "PE", "ELECTRIC", "EV"
+    ]
+    
+    upper_name = name.upper()
+    for word in remove_words:
+        # 단어 단위로 정확히 일치할 때만 제거 (EV6의 EV는 지우면 안됨)
+        # 단순히 replace하면 EV6 -> 6이 되어버리므로 주의
+        if word == "EV": 
+            # EV는 단독으로 쓰일 때만 제거 (NIRO EV -> NIRO)
+            upper_name = re.sub(r'\bEV\b', '', upper_name)
+        else:
+            upper_name = upper_name.replace(word, "")
+            
+    # 3. 공백 및 특수문자 정리
+    clean_name = upper_name.strip()
+    
+    # 4. 너무 짧아졌거나 이상하면 원본 앞단어만 사용 (안전장치)
+    if len(clean_name) < 2:
+        return name.split()[0]
+        
+    return clean_name.strip()
+
+# 검색용 키워드 생성 (공백 제거 버전)
+def make_search_key(name):
+    return simplify_name(name).replace(" ", "")
 
 # --- 데이터 로드 ---
 @st.cache_data
@@ -82,7 +114,9 @@ def load_data():
     if file_to_load:
         try:
             df = pd.read_excel(file_to_load, sheet_name=sheet_name)
-            df['검색용_이름'] = df.iloc[:, 1].astype(str).apply(normalize_name)
+            # 검색용 단순화된 이름 컬럼 미리 생성
+            df['단순_모델명'] = df.iloc[:, 1].astype(str).apply(simplify_name)
+            df['검색_키'] = df['단순_모델명'].str.replace(" ", "")
             return df
         except: return None
     return None
@@ -110,33 +144,29 @@ else:
     display_models = []
     if selected_brand != "선택하세요":
         brand_df = df[df.iloc[:, 0] == selected_brand]
-        unique_pairs = brand_df[['검색용_이름', brand_df.columns[1]]].values.tolist()
         
-        # [필터링 로직] 상용차 제외
-        filtered_pairs = []
-        for pair in unique_pairs:
-            orig_name = str(pair[1])
+        # (단순화된 이름, 원본 이름) 추출
+        pairs = brand_df[['단순_모델명', brand_df.columns[1]]].values.tolist()
+        
+        # ★ 상용차 필터링 로직 (이름으로 판단)
+        filtered_models = set()
+        
+        for simple_name, orig_name in pairs:
+            orig_str = str(orig_name)
             
-            # 현대자동차: 포터, ST1 제외
+            # 현대: 포터, ST1 제거
             if selected_brand == "현대자동차":
-                if "포터" in orig_name or "ST1" in orig_name:
-                    continue 
+                if "포터" in orig_str or "ST1" in orig_str: continue
             
-            # 기아: 봉고 제외
+            # 기아: 봉고 제거
             elif selected_brand == "기아":
-                if "봉고" in orig_name:
-                    continue 
+                if "봉고" in orig_str: continue
             
-            filtered_pairs.append(pair)
-            
-        # 중복 제거 및 대표 이름 선정
-        model_map = {}
-        for search_name, original_name in filtered_pairs:
-            if search_name not in model_map:
-                model_map[search_name] = str(original_name).split('(')[0].strip()
+            # 필터 통과한 것만 추가
+            filtered_models.add(simple_name)
         
-        # ★ [수정됨] 오름차순 정렬 (reverse=False)
-        display_models = sorted(list(model_map.values()), reverse=False)
+        # 오름차순 정렬 (ㄱ -> ㅎ)
+        display_models = sorted(list(filtered_models))
     
     with col2:
         selected_display_model = st.selectbox("2. 모델명 선택", ["선택하세요"] + display_models)
@@ -144,10 +174,14 @@ else:
     st.markdown("---") 
 
     if selected_brand != "선택하세요" and selected_display_model != "선택하세요":
-        search_key = normalize_name(selected_display_model)
+        
+        # 선택된 '단순 모델명'을 가진 모든 원본 차량 검색
+        # 예: 선택은 'IONIQ 5' -> 검색 결과는 'IONIQ 5 Long Range', 'IONIQ 5 Standard' 모두 포함
+        search_key_selected = selected_display_model.replace(" ", "")
+        
         target_rows = df[
             (df.iloc[:, 0] == selected_brand) & 
-            (df['검색용_이름'] == search_key)
+            (df['검색_키'] == search_key_selected)
         ]
         
         headers = df.columns[2:8].tolist()
@@ -161,7 +195,6 @@ else:
             else:
                 normal_rows.append(row)
 
-        # HTML 생성 함수
         def make_one_line_html(row):
             items = []
             vals = row.iloc[2:8].tolist()
@@ -175,7 +208,6 @@ else:
                 else:
                     v_str = format_value(v)
                 
-                # 연비/효율 강조
                 if any(keyword in str(h) for keyword in ['연비', '효율', 'km']):
                      items.append(f"<span class='info-header'>{h}:</span> <span class='highlight-efficiency'>{v_str}</span>")
                 else:
