@@ -30,10 +30,7 @@ st.markdown("""
         border-bottom: 1px dashed rgba(128, 128, 128, 0.3);
         line-height: 1.6;
     }
-
-    .car-info-line:last-child {
-        border-bottom: none;
-    }
+    .car-info-line:last-child { border-bottom: none; }
 
     .info-item {
         white-space: nowrap;        
@@ -48,6 +45,7 @@ st.markdown("""
         font-size: 0.9em;
     }
 
+    /* 모델명만 볼드 */
     .model-name {
         font-weight: bold;    
         color: var(--text-color);
@@ -117,6 +115,7 @@ def shorten_header(header):
     if "적용일자" in header: return "적용일"
     return header
 
+# --- 모델명 통합 및 클렌징 로직 ---
 def get_core_model_name(original_name, brand):
     if not isinstance(original_name, str): return str(original_name)
     name = original_name.upper()
@@ -125,11 +124,19 @@ def get_core_model_name(original_name, brand):
         name = name.replace(g, "")
     name = name.strip()
 
+    # [쓰레기 데이터 제거] 브랜드명이 모델명으로 들어간 경우 삭제
+    if brand == "한국GM":
+        if name in ["CHEVROLET", "쉐보레"]: return None
+    if brand == "볼보":
+        if name in ["VOLVO", "볼보"]: return None
+
+    # 벤츠 EQ
     if brand == "메르세데스벤츠":
         match = re.search(r'(EQ[A-Z])', name)
         if match: return match.group(1)
         return name.split()[0] if name else original_name
 
+    # 현대/기아/제네시스
     if brand in ["기아", "현대자동차", "제네시스"]:
         if "EV" in name:
              match = re.search(r'(EV\s?\d+)', name)
@@ -142,15 +149,18 @@ def get_core_model_name(original_name, brand):
         for k in ["KONA", "코나", "NIRO", "니로", "RAY", "레이", "CASPER", "캐스퍼"]:
              if k in name: return k
 
+    # BMW
     if brand == "BMW":
         first = name.split()[0]
         if first.startswith("I"): return first
         
+    # 아우디
     if brand in ["Audi", "아우디"]:
         if "Q4" in name: return "Q4 e-tron"
         if "Q8" in name: return "Q8 e-tron"
         if name.startswith("E-TRON"): return "e-tron"
 
+    # 테슬라
     if brand == "테슬라" and "MODEL" in name:
         parts = name.split()
         try:
@@ -158,6 +168,7 @@ def get_core_model_name(original_name, brand):
             if idx + 1 < len(parts): return f"MODEL {parts[idx+1]}"
         except: pass
 
+    # 폴스타
     if brand == "폴스타" and "POLESTAR" in name:
         parts = name.split()
         try:
@@ -165,8 +176,10 @@ def get_core_model_name(original_name, brand):
              if idx+1 < len(parts): return f"POLESTAR {parts[idx+1]}"
         except: pass
 
+    # 폭스바겐
     if brand == "폭스바겐" and "ID." in name: return name.split()[0]
 
+    # 공통 접미사 제거
     remove_suffixes = ["LONG RANGE", "LONGRANGE", "STANDARD", "PERFORMANCE", "2WD", "4WD", "AWD", "RWD", "FWD", "GT-LINE", "GT", "PRO", "PRIME"]
     for w in remove_suffixes: name = name.replace(w, "")
     
@@ -192,80 +205,110 @@ df = load_data()
 if df is None:
     st.error("❌ 엑셀 파일을 찾을 수 없습니다.")
 else:
-    preferred_order = ["현대자동차", "기아", "한국GM", "르노코리아", "케이지모빌리티", "BMW", "메르세데스벤츠", "Audi", "폭스바겐", "볼보", "테슬라", "폴스타", "포르쉐코리아", "BYD", "Lexus"]
+    # 1. 브랜드 노출 제한 (현대 ~ 렉서스)
+    allowed_brands = [
+        "현대자동차", "기아", "한국GM", "르노코리아", "케이지모빌리티", 
+        "BMW", "메르세데스벤츠", "Audi", "폭스바겐", "볼보", 
+        "테슬라", "폴스타", "포르쉐코리아", "BYD", "Lexus"
+    ]
+    
     existing_brands = df.iloc[:, 0].dropna().astype(str).unique().tolist()
-    sorted_brands = [b for b in preferred_order if b in existing_brands] + [b for b in existing_brands if b not in preferred_order]
+    # 엑셀에 있어도 allowed_brands에 없으면 제외됨 (닛산 등 비노출)
+    sorted_brands = [b for b in allowed_brands if b in existing_brands]
 
     col1, col2 = st.columns(2)
     with col1:
         selected_brand = st.selectbox("1. 업체명 선택", ["선택하세요"] + sorted_brands)
     
+    # 2. 모델 리스트 생성
     display_models = []
+    
+    # 브랜드별 모든 데이터를 미리 처리 (등급 판정용)
     if selected_brand != "선택하세요":
-        brand_df = df[df.iloc[:, 0] == selected_brand]
-        filtered_models = set()
-        for idx, row in brand_df.iterrows():
-            orig_name = str(row.iloc[1])
-            if selected_brand == "현대자동차" and ("포터" in orig_name or "ST1" in orig_name): continue
-            if selected_brand == "기아" and ("봉고" in orig_name): continue
-            filtered_models.add(get_core_model_name(orig_name, selected_brand))
-        display_models = sorted(list(filtered_models))
+        brand_df = df[df.iloc[:, 0] == selected_brand].copy()
+        
+        # 핵심 모델명 컬럼 추가
+        brand_df['Core_Model'] = brand_df.iloc[:, 1].apply(lambda x: get_core_model_name(str(x), selected_brand))
+        
+        # None(쓰레기 데이터) 및 상용차 필터링
+        brand_df = brand_df.dropna(subset=['Core_Model'])
+        if selected_brand == "현대자동차":
+            brand_df = brand_df[~brand_df.iloc[:, 1].str.contains("포터|ST1")]
+        if selected_brand == "기아":
+            brand_df = brand_df[~brand_df.iloc[:, 1].str.contains("봉고")]
+            
+        # 모델 목록 추출
+        display_models = sorted(list(brand_df['Core_Model'].unique()))
     
     with col2:
         if selected_brand == "선택하세요":
             st.selectbox("2. 모델명 선택", ["업체를 먼저 선택하세요"], disabled=True)
             selected_display_model = None
         else:
-            selected_display_model = st.selectbox("2. 모델명 선택", display_models, index=0) if display_models else None
+            # 기본값: 전체 보기 (None 대신 "전체 보기" 옵션 제공)
+            model_options = ["전체 보기"] + display_models
+            selected_display_model = st.selectbox("2. 모델명 선택", model_options)
 
-    # --- 결과 출력 ---
-    if selected_brand != "선택하세요" and selected_display_model:
-        brand_df = df[df.iloc[:, 0] == selected_brand]
-        target_rows = []
-        for idx, row in brand_df.iterrows():
-            if get_core_model_name(str(row.iloc[1]), selected_brand) == selected_display_model:
-                target_rows.append(row)
+    st.markdown("---") 
+
+    # --- 결과 처리 및 출력 ---
+    if selected_brand != "선택하세요":
         
-        if target_rows:
-            target_df = pd.DataFrame(target_rows)
+        # 1. 필터링 (전체 보기 vs 특정 모델)
+        if selected_display_model == "전체 보기":
+            target_df = brand_df # 이미 위에서 전처리된 DF 사용
+        else:
+            target_df = brand_df[brand_df['Core_Model'] == selected_display_model]
+        
+        if not target_df.empty:
             headers = df.columns[2:8].tolist()
             target_df['제외일자_raw'] = target_df.iloc[:, 8]
             
-            excluded_mask = target_df['제외일자_raw'].notna() & (target_df['제외일자_raw'].astype(str).str.strip() != "")
-            excluded_df = target_df[excluded_mask]
-            normal_df = target_df[~excluded_mask]
+            # --- [핵심] 지능형 차급(Threshold) 판정 로직 ---
+            # 모델별로 그룹핑하여 각 모델 가문의 '최소 생존 기준'을 계산해둡니다.
+            # 예: "아이오닉5" 그룹은 4.2 기준, "코나" 그룹은 5.0 기준
             
-            # --- [정상 차량] 그룹 대표 등급 추론 ---
-            # 정상 차량 중 '가장 낮은 연비'로 살아남은 녀석이 기준이 됨
-            detected_class_name = "중형" 
-            detected_threshold = 4.2
-            
-            if not normal_df.empty:
+            model_threshold_map = {} # {모델명: (차급명, 기준값)}
+
+            # 모델별로 순회하며 기준 수립
+            for model_name, group in target_df.groupby('Core_Model'):
+                # 정상인 차들의 연비만 수집
+                alive_mask = ~(group['제외일자_raw'].notna() & (group['제외일자_raw'].astype(str).str.strip() != ""))
+                alive_group = group[alive_mask]
+                
                 normal_effs = []
-                for _, row in normal_df.iterrows():
+                for _, row in alive_group.iterrows():
                     for h, v in zip(headers, row.iloc[2:8].tolist()):
                         if "효율" in str(h) or "연비" in str(h):
                             try: normal_effs.append(float(v))
                             except: pass
                 
+                # 기본값 (중형)
+                c_name, c_th = "중형", 4.2
+                
                 if normal_effs:
                     min_eff = min(normal_effs)
-                    if min_eff < 4.2:
-                        detected_class_name = "대형"
-                        detected_threshold = 3.4
-                    elif min_eff < 5.0:
-                        detected_class_name = "중형"
-                        detected_threshold = 4.2
-                    else:
-                        detected_class_name = "소형"
-                        detected_threshold = 5.0
-            
-            # HTML 생성
+                    if min_eff < 4.2: c_name, c_th = "대형", 3.4
+                    elif min_eff < 5.0: c_name, c_th = "중형", 4.2
+                    else: c_name, c_th = "소형", 5.0
+                
+                model_threshold_map[model_name] = (c_name, c_th)
+
+            # --- 데이터 분리 (제외 / 정상) ---
+            excluded_mask = target_df['제외일자_raw'].notna() & (target_df['제외일자_raw'].astype(str).str.strip() != "")
+            excluded_df = target_df[excluded_mask]
+            normal_df = target_df[~excluded_mask]
+
+            # HTML 생성 함수
             def make_html_line(row, is_excluded):
+                core_model = row['Core_Model']
                 orig_name = row.iloc[1]
-                display_name = orig_name.replace("The New", "").replace("Mercedes-Benz", "").strip()
+                display_name = str(orig_name).replace("The New", "").replace("Mercedes-Benz", "").strip()
                 vals = row.iloc[2:8].tolist()
                 
+                # 이 모델의 기준 가져오기
+                detected_class, detected_th = model_threshold_map.get(core_model, ("중형", 4.2))
+
                 parts = []
                 parts.append(f"<div class='info-item'><span class='label'>모델:</span><span class='model-name'>{display_name}</span></div>")
                 
@@ -282,34 +325,27 @@ else:
                     else:
                         parts.append(f"<div class='info-item'><span class='label'>{short_h}:</span><span class='value-text'>{val_str}</span></div>")
                 
-                # --- [핵심] 배지 생성 로직 분기 ---
+                # 배지 생성
                 badge = ""
                 if is_excluded:
-                    # [제외 차량] 내 연비가 어디에 걸려서 죽었는지 판단
-                    if my_eff < 3.4:
-                        badge = "<span class='grade-badge-fail'>대형(3.4) 미달</span>"
-                    elif 3.4 <= my_eff < 4.2:
-                        badge = "<span class='grade-badge-fail'>중형(4.2) 미달</span>"
-                    elif 4.2 <= my_eff < 5.0:
-                        badge = "<span class='grade-badge-fail'>소형(5.0) 미달</span>"
-                    else:
-                        badge = "<span class='grade-badge-fail'>기준 미달</span>"
+                    if my_eff < 3.4: badge = "<span class='grade-badge-fail'>대형(3.4) 미달</span>"
+                    elif 3.4 <= my_eff < 4.2: badge = "<span class='grade-badge-fail'>중형(4.2) 미달</span>"
+                    elif 4.2 <= my_eff < 5.0: badge = "<span class='grade-badge-fail'>소형(5.0) 미달</span>"
+                    else: badge = "<span class='grade-badge-fail'>기준 미달</span>"
                 else:
-                    # [정상 차량] 그룹 대표 기준(detected)을 적용
-                    badge = f"<span class='grade-badge-pass'>{detected_class_name}({detected_threshold}) 충족</span>"
+                    badge = f"<span class='grade-badge-pass'>{detected_class}({detected_th}) 충족</span>"
 
                 if badge: parts.append(f"<div class='info-item'>{badge}</div>")
                 return "<div class='car-info-line'>" + "".join(parts) + "</div>"
 
-            # 출력 1. 제외 차량
+            # 1. 제외된 차량 (그룹핑)
             if not excluded_df.empty:
                 excluded_df['제외일_str'] = excluded_df['제외일자_raw'].apply(
                     lambda x: x.strftime("%Y-%m-%d") if isinstance(x, datetime.datetime) else str(x).split(" ")[0]
                 )
-                grouped = excluded_df.groupby('제외일_str')
                 
                 st.error(f"📉 [기준 미달/제외] - 총 {len(excluded_df)}건")
-                for date_str, group in grouped:
+                for date_str, group in excluded_df.groupby('제외일_str'):
                     with st.container():
                         st.markdown(f"**📅 제외일: {date_str}** ({len(group)}대)")
                         html_content = "<div class='result-container'>"
@@ -318,7 +354,7 @@ else:
                         html_content += "</div>"
                         st.markdown(html_content, unsafe_allow_html=True)
 
-            # 출력 2. 정상 차량
+            # 2. 정상 차량
             if not normal_df.empty:
                 if not excluded_df.empty: st.markdown("---")
                 st.success(f"✅ [기준 충족/정상] - 총 {len(normal_df)}건")
@@ -327,5 +363,6 @@ else:
                     html_content += make_html_line(row, is_excluded=False)
                 html_content += "</div>"
                 st.markdown(html_content, unsafe_allow_html=True)
+
         else:
             st.warning("데이터가 없습니다.")
