@@ -5,13 +5,12 @@ import os
 import re
 
 # --- 페이지 설정 ---
-# 브라우저 탭 제목에도 이름을 넣었습니다.
 st.set_page_config(page_title="2026 친환경차 현황 by 김희주", page_icon="⚡", layout="wide")
 
 # --- 스타일 설정 ---
 st.markdown("""
     <style>
-    /* 결과 박스 스타일 */
+    /* 결과 박스 */
     .result-container {
         background-color: var(--secondary-background-color);
         padding: 15px;
@@ -20,7 +19,7 @@ st.markdown("""
         border: 1px solid rgba(128, 128, 128, 0.2);
     }
     
-    /* 반응형 레이아웃 (줄바꿈 허용) */
+    /* 반응형 레이아웃 */
     .car-info-line {
         display: flex;
         flex-wrap: wrap;            
@@ -42,7 +41,7 @@ st.markdown("""
         align-items: center;
     }
 
-    /* 항목 제목 (볼드 제거) */
+    /* 라벨 (볼드 X) */
     .label {
         font-weight: normal; 
         color: var(--primary-color);
@@ -50,7 +49,7 @@ st.markdown("""
         font-size: 0.9em;
     }
 
-    /* ★ 모델명만 유일하게 볼드 처리 */
+    /* 모델명 (볼드 O) */
     .model-name {
         font-weight: bold;    
         color: var(--text-color);
@@ -58,7 +57,7 @@ st.markdown("""
         margin-right: 5px;
     }
 
-    /* 연비/주행거리 강조 (색상만, 볼드 X) */
+    /* 강조값 (볼드 X) */
     .highlight {
         background-color: rgba(255, 255, 0, 0.2);
         color: #ff4b4b;
@@ -67,13 +66,12 @@ st.markdown("""
         border-radius: 3px;
     }
     
-    /* 일반 값 */
     .value-text {
         color: var(--text-color);
         font-weight: normal;
     }
 
-    /* 판정 결과 배지 스타일 */
+    /* 배지 스타일 */
     .grade-badge-fail {
         background-color: #ffebee;
         color: #c62828;
@@ -95,7 +93,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 메인 타이틀 (서명 포함) ---
 st.markdown("### 2026 친환경차(전기차) 등재 현황 by 김희주")
 
 # --- 기준표 ---
@@ -123,33 +120,6 @@ def shorten_header(header):
     if "적용일자" in header: return "적용일"
     return header
 
-# 등급 판정 로직 (역추적 방식)
-def analyze_grade(efficiency_val, is_excluded):
-    try:
-        eff = float(efficiency_val)
-    except:
-        return "" 
-
-    if is_excluded:
-        if eff < 3.4:
-            return "<span class='grade-badge-fail'>대형(3.4) 미달</span>"
-        elif 3.4 <= eff < 4.2:
-            return "<span class='grade-badge-fail'>중형(4.2) 미달</span>"
-        elif 4.2 <= eff < 5.0:
-            return "<span class='grade-badge-fail'>소형(5.0) 미달</span>"
-        else:
-            return "<span class='grade-badge-fail'>기준 미달</span>"
-    else:
-        if eff >= 5.0:
-            return "<span class='grade-badge-pass'>소형(5.0) 충족</span>"
-        elif eff >= 4.2:
-            return "<span class='grade-badge-pass'>중형(4.2) 충족</span>"
-        elif eff >= 3.4:
-            return "<span class='grade-badge-pass'>대형(3.4) 충족</span>"
-        else:
-            return "<span class='grade-badge-pass'>기준 충족</span>"
-
-# 모델명 통합 로직
 def get_core_model_name(original_name, brand):
     if not isinstance(original_name, str): return str(original_name)
     name = original_name.upper()
@@ -158,13 +128,11 @@ def get_core_model_name(original_name, brand):
         name = name.replace(g, "")
     name = name.strip()
 
-    # 벤츠: EQ+알파벳 (EQB, EQE 등) 추출
     if brand == "메르세데스벤츠":
         match = re.search(r'(EQ[A-Z])', name)
         if match: return match.group(1)
         return name.split()[0] if name else original_name
 
-    # 현대/기아: EV시리즈, 아이오닉, GV시리즈
     if brand in ["기아", "현대자동차", "제네시스"]:
         if "EV" in name:
              match = re.search(r'(EV\s?\d+)', name)
@@ -177,18 +145,15 @@ def get_core_model_name(original_name, brand):
         for k in ["KONA", "코나", "NIRO", "니로", "RAY", "레이", "CASPER", "캐스퍼"]:
              if k in name: return k
 
-    # BMW: i로 시작하는 첫 단어
     if brand == "BMW":
         first = name.split()[0]
         if first.startswith("I"): return first
         
-    # 아우디
     if brand in ["Audi", "아우디"]:
         if "Q4" in name: return "Q4 e-tron"
         if "Q8" in name: return "Q8 e-tron"
         if name.startswith("E-TRON"): return "e-tron"
 
-    # 테슬라
     if brand == "테슬라" and "MODEL" in name:
         parts = name.split()
         try:
@@ -196,7 +161,6 @@ def get_core_model_name(original_name, brand):
             if idx + 1 < len(parts): return f"MODEL {parts[idx+1]}"
         except: pass
 
-    # 폴스타
     if brand == "폴스타" and "POLESTAR" in name:
         parts = name.split()
         try:
@@ -204,10 +168,8 @@ def get_core_model_name(original_name, brand):
              if idx+1 < len(parts): return f"POLESTAR {parts[idx+1]}"
         except: pass
 
-    # 폭스바겐
     if brand == "폭스바겐" and "ID." in name: return name.split()[0]
 
-    # 공통: 수식어 제거
     remove_suffixes = ["LONG RANGE", "LONGRANGE", "STANDARD", "PERFORMANCE", "2WD", "4WD", "AWD", "RWD", "FWD", "GT-LINE", "GT", "PRO", "PRIME"]
     for w in remove_suffixes: name = name.replace(w, "")
     
@@ -247,10 +209,8 @@ else:
         filtered_models = set()
         for idx, row in brand_df.iterrows():
             orig_name = str(row.iloc[1])
-            # 상용차 제외
             if selected_brand == "현대자동차" and ("포터" in orig_name or "ST1" in orig_name): continue
             if selected_brand == "기아" and ("봉고" in orig_name): continue
-            
             filtered_models.add(get_core_model_name(orig_name, selected_brand))
         display_models = sorted(list(filtered_models))
     
@@ -274,37 +234,83 @@ else:
             headers = df.columns[2:8].tolist()
             target_df['제외일자_raw'] = target_df.iloc[:, 8]
             
-            excluded_df = target_df[target_df['제외일자_raw'].notna() & (target_df['제외일자_raw'].astype(str).str.strip() != "")]
-            normal_df = target_df[~target_df.index.isin(excluded_df.index)]
-
+            # 제외 여부 확인
+            excluded_mask = target_df['제외일자_raw'].notna() & (target_df['제외일자_raw'].astype(str).str.strip() != "")
+            excluded_df = target_df[excluded_mask]
+            normal_df = target_df[~excluded_mask]
+            
+            # --- ★ [핵심 로직] 그룹 전체의 '최소 기준' 추론 ---
+            # 1. 정상 차량들의 연비 수집
+            normal_effs = []
+            for _, row in normal_df.iterrows():
+                # 헤더에서 '효율'이나 '연비'가 포함된 컬럼의 값을 찾음
+                for h, v in zip(headers, row.iloc[2:8].tolist()):
+                    if "효율" in str(h) or "연비" in str(h):
+                        try: normal_effs.append(float(v))
+                        except: pass
+            
+            # 2. 그룹의 '대표 차급' 결정 (가장 낮은 연비로 살아남은 녀석 기준)
+            # 기본값: 알 수 없음 (중형으로 가정)
+            detected_class_name = "중형" 
+            detected_threshold = 4.2
+            
+            if normal_effs:
+                min_eff = min(normal_effs)
+                if min_eff < 4.2:
+                    # 4.2 미만인데 살아남았다 -> 대형이 확실함
+                    detected_class_name = "대형"
+                    detected_threshold = 3.4
+                elif min_eff < 5.0:
+                    # 5.0 미만인데 살아남았다 -> 중형(또는 대형) -> 보통 중형으로 봄
+                    detected_class_name = "중형"
+                    detected_threshold = 4.2
+                else:
+                    # 살아남은 애들이 다 5.0 넘음 -> 소형일 확률 높음
+                    detected_class_name = "소형"
+                    detected_threshold = 5.0
+            
+            # --- HTML 생성 함수 (추론된 차급 적용) ---
             def make_html_line(row, is_excluded):
                 orig_name = row.iloc[1]
                 display_name = orig_name.replace("The New", "").replace("Mercedes-Benz", "").strip()
                 vals = row.iloc[2:8].tolist()
                 
                 parts = []
-                # 모델명 (볼드)
                 parts.append(f"<div class='info-item'><span class='label'>모델:</span><span class='model-name'>{display_name}</span></div>")
                 
-                eff_val = 0
+                my_eff = 0
                 for h, v in zip(headers, vals):
                     val_str = v.strftime("%Y-%m-%d") if isinstance(v, datetime.datetime) else format_value(v)
                     short_h = shorten_header(h)
                     
                     if "효율" in short_h or "주행" in short_h:
                         parts.append(f"<div class='info-item'><span class='label'>{short_h}:</span><span class='highlight'>{val_str}</span></div>")
-                        if "효율" in short_h: eff_val = v 
+                        if "효율" in short_h: 
+                            try: my_eff = float(v)
+                            except: pass
                     else:
                         parts.append(f"<div class='info-item'><span class='label'>{short_h}:</span><span class='value-text'>{val_str}</span></div>")
                 
-                # 판정 배지
-                grade_badge = analyze_grade(eff_val, is_excluded)
-                if grade_badge:
-                    parts.append(f"<div class='info-item'>{grade_badge}</div>")
-                
+                # 배지 생성 (detected_class_name 사용)
+                badge = ""
+                if is_excluded:
+                    # 제외된 경우: 왜 제외됐는지?
+                    # 추론된 기준(예: 대형 3.4)보다 낮아서? 아니면 원래 기준보다 낮아서?
+                    # 제외된 차는 해당 차급 기준 미달로 표시
+                    if my_eff < detected_threshold:
+                         badge = f"<span class='grade-badge-fail'>{detected_class_name}({detected_threshold}) 미달</span>"
+                    else:
+                         # 추론된 기준은 넘었는데 제외됐다? -> 사실 더 높은 차급이었을 수 있음
+                         # 예: 추론은 대형(3.4)인데, 얘는 3.8인데 죽음 -> 사실 중형(4.2)이었던 거임
+                         badge = "<span class='grade-badge-fail'>기준 미달</span>"
+                else:
+                    # 정상인 경우: 추론된 차급 기준 충족 표시
+                    badge = f"<span class='grade-badge-pass'>{detected_class_name}({detected_threshold}) 충족</span>"
+
+                if badge: parts.append(f"<div class='info-item'>{badge}</div>")
                 return "<div class='car-info-line'>" + "".join(parts) + "</div>"
 
-            # 1. 제외된 차량 (그룹핑)
+            # 1. 제외된 차량 출력
             if not excluded_df.empty:
                 excluded_df['제외일_str'] = excluded_df['제외일자_raw'].apply(
                     lambda x: x.strftime("%Y-%m-%d") if isinstance(x, datetime.datetime) else str(x).split(" ")[0]
@@ -321,7 +327,7 @@ else:
                         html_content += "</div>"
                         st.markdown(html_content, unsafe_allow_html=True)
 
-            # 2. 정상 차량
+            # 2. 정상 차량 출력
             if not normal_df.empty:
                 if not excluded_df.empty: st.markdown("---")
                 st.success(f"✅ [기준 충족/정상] - 총 {len(normal_df)}건")
