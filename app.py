@@ -41,7 +41,6 @@ st.markdown("""
         align-items: center;
     }
 
-    /* 라벨 (볼드 X) */
     .label {
         font-weight: normal; 
         color: var(--primary-color);
@@ -49,7 +48,6 @@ st.markdown("""
         font-size: 0.9em;
     }
 
-    /* 모델명 (볼드 O) */
     .model-name {
         font-weight: bold;    
         color: var(--text-color);
@@ -57,7 +55,6 @@ st.markdown("""
         margin-right: 5px;
     }
 
-    /* 강조값 (볼드 X) */
     .highlight {
         background-color: rgba(255, 255, 0, 0.2);
         color: #ff4b4b;
@@ -234,42 +231,36 @@ else:
             headers = df.columns[2:8].tolist()
             target_df['제외일자_raw'] = target_df.iloc[:, 8]
             
-            # 제외 여부 확인
             excluded_mask = target_df['제외일자_raw'].notna() & (target_df['제외일자_raw'].astype(str).str.strip() != "")
             excluded_df = target_df[excluded_mask]
             normal_df = target_df[~excluded_mask]
             
-            # --- ★ [핵심 로직] 그룹 전체의 '최소 기준' 추론 ---
-            # 1. 정상 차량들의 연비 수집
-            normal_effs = []
-            for _, row in normal_df.iterrows():
-                # 헤더에서 '효율'이나 '연비'가 포함된 컬럼의 값을 찾음
-                for h, v in zip(headers, row.iloc[2:8].tolist()):
-                    if "효율" in str(h) or "연비" in str(h):
-                        try: normal_effs.append(float(v))
-                        except: pass
-            
-            # 2. 그룹의 '대표 차급' 결정 (가장 낮은 연비로 살아남은 녀석 기준)
-            # 기본값: 알 수 없음 (중형으로 가정)
+            # --- [정상 차량] 그룹 대표 등급 추론 ---
+            # 정상 차량 중 '가장 낮은 연비'로 살아남은 녀석이 기준이 됨
             detected_class_name = "중형" 
             detected_threshold = 4.2
             
-            if normal_effs:
-                min_eff = min(normal_effs)
-                if min_eff < 4.2:
-                    # 4.2 미만인데 살아남았다 -> 대형이 확실함
-                    detected_class_name = "대형"
-                    detected_threshold = 3.4
-                elif min_eff < 5.0:
-                    # 5.0 미만인데 살아남았다 -> 중형(또는 대형) -> 보통 중형으로 봄
-                    detected_class_name = "중형"
-                    detected_threshold = 4.2
-                else:
-                    # 살아남은 애들이 다 5.0 넘음 -> 소형일 확률 높음
-                    detected_class_name = "소형"
-                    detected_threshold = 5.0
+            if not normal_df.empty:
+                normal_effs = []
+                for _, row in normal_df.iterrows():
+                    for h, v in zip(headers, row.iloc[2:8].tolist()):
+                        if "효율" in str(h) or "연비" in str(h):
+                            try: normal_effs.append(float(v))
+                            except: pass
+                
+                if normal_effs:
+                    min_eff = min(normal_effs)
+                    if min_eff < 4.2:
+                        detected_class_name = "대형"
+                        detected_threshold = 3.4
+                    elif min_eff < 5.0:
+                        detected_class_name = "중형"
+                        detected_threshold = 4.2
+                    else:
+                        detected_class_name = "소형"
+                        detected_threshold = 5.0
             
-            # --- HTML 생성 함수 (추론된 차급 적용) ---
+            # HTML 생성
             def make_html_line(row, is_excluded):
                 orig_name = row.iloc[1]
                 display_name = orig_name.replace("The New", "").replace("Mercedes-Benz", "").strip()
@@ -291,26 +282,26 @@ else:
                     else:
                         parts.append(f"<div class='info-item'><span class='label'>{short_h}:</span><span class='value-text'>{val_str}</span></div>")
                 
-                # 배지 생성 (detected_class_name 사용)
+                # --- [핵심] 배지 생성 로직 분기 ---
                 badge = ""
                 if is_excluded:
-                    # 제외된 경우: 왜 제외됐는지?
-                    # 추론된 기준(예: 대형 3.4)보다 낮아서? 아니면 원래 기준보다 낮아서?
-                    # 제외된 차는 해당 차급 기준 미달로 표시
-                    if my_eff < detected_threshold:
-                         badge = f"<span class='grade-badge-fail'>{detected_class_name}({detected_threshold}) 미달</span>"
+                    # [제외 차량] 내 연비가 어디에 걸려서 죽었는지 판단
+                    if my_eff < 3.4:
+                        badge = "<span class='grade-badge-fail'>대형(3.4) 미달</span>"
+                    elif 3.4 <= my_eff < 4.2:
+                        badge = "<span class='grade-badge-fail'>중형(4.2) 미달</span>"
+                    elif 4.2 <= my_eff < 5.0:
+                        badge = "<span class='grade-badge-fail'>소형(5.0) 미달</span>"
                     else:
-                         # 추론된 기준은 넘었는데 제외됐다? -> 사실 더 높은 차급이었을 수 있음
-                         # 예: 추론은 대형(3.4)인데, 얘는 3.8인데 죽음 -> 사실 중형(4.2)이었던 거임
-                         badge = "<span class='grade-badge-fail'>기준 미달</span>"
+                        badge = "<span class='grade-badge-fail'>기준 미달</span>"
                 else:
-                    # 정상인 경우: 추론된 차급 기준 충족 표시
+                    # [정상 차량] 그룹 대표 기준(detected)을 적용
                     badge = f"<span class='grade-badge-pass'>{detected_class_name}({detected_threshold}) 충족</span>"
 
                 if badge: parts.append(f"<div class='info-item'>{badge}</div>")
                 return "<div class='car-info-line'>" + "".join(parts) + "</div>"
 
-            # 1. 제외된 차량 출력
+            # 출력 1. 제외 차량
             if not excluded_df.empty:
                 excluded_df['제외일_str'] = excluded_df['제외일자_raw'].apply(
                     lambda x: x.strftime("%Y-%m-%d") if isinstance(x, datetime.datetime) else str(x).split(" ")[0]
@@ -327,7 +318,7 @@ else:
                         html_content += "</div>"
                         st.markdown(html_content, unsafe_allow_html=True)
 
-            # 2. 정상 차량 출력
+            # 출력 2. 정상 차량
             if not normal_df.empty:
                 if not excluded_df.empty: st.markdown("---")
                 st.success(f"✅ [기준 충족/정상] - 총 {len(normal_df)}건")
