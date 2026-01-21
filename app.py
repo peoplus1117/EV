@@ -115,7 +115,7 @@ def get_core_model_name(original_name, brand):
     name = original_name.upper()
     name = re.sub(r'\(.*?\)', '', name)
     
-    # 1. 브랜드 이름 등 불필요한 단어 제거 (쉐보레, 볼보 추가)
+    # 불필요한 단어 제거
     garbage_words = [
         "THE NEW", "ALL NEW", "FACELIFT", 
         "MERCEDES-BENZ", "MERCEDES", "BENZ",
@@ -126,11 +126,9 @@ def get_core_model_name(original_name, brand):
         name = name.replace(g, "")
     
     name = name.strip()
-
-    # 빈 문자열이면 (즉, 모델명이 그냥 'CHEVROLET' 였던 경우) None 반환하여 필터링
     if not name: return None
 
-    # 2. 브랜드별 키워드 추출
+    # 브랜드별 키워드
     if brand == "메르세데스벤츠":
         match = re.search(r'(EQ[A-Z])', name)
         if match: return match.group(1)
@@ -173,11 +171,9 @@ def get_core_model_name(original_name, brand):
 
     if brand == "폭스바겐" and "ID." in name: return name.split()[0]
 
-    # 3. 공통 접미사 제거 및 첫 단어 추출
+    # 공통 접미사 제거
     remove_suffixes = ["LONG RANGE", "LONGRANGE", "STANDARD", "PERFORMANCE", "2WD", "4WD", "AWD", "RWD", "FWD", "GT-LINE", "GT", "PRO", "PRIME", "EUV", "EV"]
     for w in remove_suffixes:
-        # 단어 단위로 제거 (EUV, EV 등은 모델명 일부가 아닐 때만)
-        # 여기서는 단순 replace 사용하되, BOLT EV -> BOLT가 되도록 유도
         name = name.replace(w, "")
     
     clean = name.strip()
@@ -211,6 +207,9 @@ else:
     existing_brands = df.iloc[:, 0].dropna().astype(str).unique().tolist()
     sorted_brands = [b for b in allowed_brands if b in existing_brands]
 
+    # 헤더 정의 (미리 해둬야 에러 안 남)
+    headers = df.columns[2:8].tolist()
+
     col1, col2 = st.columns(2)
     with col1:
         selected_brand = st.selectbox("1. 업체명 선택", ["선택하세요"] + sorted_brands)
@@ -223,6 +222,9 @@ else:
     if selected_brand != "선택하세요":
         brand_df = df[df.iloc[:, 0] == selected_brand].copy()
         
+        # [수정] 제외일자 컬럼을 미리 생성 (KeyError 방지)
+        brand_df['제외일자_raw'] = brand_df.iloc[:, 8]
+
         # 모델명 추출
         brand_df['Core_Model'] = brand_df.iloc[:, 1].apply(lambda x: get_core_model_name(str(x), selected_brand))
         
@@ -253,14 +255,9 @@ else:
             target_df = brand_df[brand_df['Core_Model'] == selected_display_model]
         
         if not target_df.empty:
-            headers = df.columns[2:8].tolist()
-            target_df['제외일자_raw'] = target_df.iloc[:, 8]
             
             # --- 등급 기준(Threshold) 계산 ---
-            # 전체 보기 상태에서도 각 차량이 속한 '모델 그룹'의 기준을 따라가야 함
-            # 따라서 전체 데이터를 순회하며 모델별 기준을 미리 계산
-            
-            # 기준 계산은 '선택된 브랜드 전체'를 대상으로 한 번 수행하는 것이 좋음
+            # 계산용 DF는 전체 데이터(brand_df)를 사용해야 그룹 전체 기준을 알 수 있음
             calc_df = brand_df 
             
             for model_name, group in calc_df.groupby('Core_Model'):
@@ -292,7 +289,7 @@ else:
             def make_html_line(row, is_excluded):
                 core_model = row['Core_Model']
                 orig_name = row.iloc[1]
-                # 브랜드 이름 등 불필요한 단어 제거 (화면 표시용)
+                # 화면 표시용 이름 정제
                 display_name = str(orig_name)
                 for g in ["The New", "All New", "Mercedes-Benz", "MERCEDES-BENZ", "CHEVROLET", "Chevrolet", "Volvo", "VOLVO"]:
                     display_name = display_name.replace(g, "")
@@ -321,13 +318,11 @@ else:
                 
                 badge = ""
                 if is_excluded:
-                    # 탈락 사유
                     if my_eff < 3.4: badge = "<span class='grade-badge-fail'>대형(3.4) 미달</span>"
                     elif 3.4 <= my_eff < 4.2: badge = "<span class='grade-badge-fail'>중형(4.2) 미달</span>"
                     elif 4.2 <= my_eff < 5.0: badge = "<span class='grade-badge-fail'>소형(5.0) 미달</span>"
                     else: badge = "<span class='grade-badge-fail'>기준 미달</span>"
                 else:
-                    # 합격 기준
                     badge = f"<span class='grade-badge-pass'>{detected_class}({detected_th}) 충족</span>"
 
                 if badge: parts.append(f"<div class='info-item'>{badge}</div>")
@@ -358,5 +353,6 @@ else:
                     html_content += make_html_line(row, is_excluded=False)
                 html_content += "</div>"
                 st.markdown(html_content, unsafe_allow_html=True)
+
         else:
             st.warning("데이터가 없습니다.")
