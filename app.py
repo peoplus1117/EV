@@ -3,18 +3,16 @@ import pandas as pd
 import datetime
 import os
 
-# --- 페이지 설정 (레이아웃 넓게) ---
-st.set_page_config(page_title="2026 친환경차 조회", page_icon="🚗", layout="centered")
+# --- 페이지 설정 ---
+st.set_page_config(page_title="2026 친환경차 조회", page_icon="⚡", layout="centered")
 
-# --- 커스텀 CSS (가운데 정렬 & 테이블 스타일) ---
+# --- 커스텀 CSS ---
 st.markdown("""
     <style>
-    /* 테이블 헤더와 셀 내용 가운데 정렬 */
     th, td {
         text-align: center !important;
         vertical-align: middle !important;
     }
-    /* 테이블 외곽선 깔끔하게 */
     table {
         width: 100%;
         border-collapse: collapse;
@@ -22,10 +20,24 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🚗 2026 친환경차(전기차) 등재 현황")
+# --- 1. 제목 수정 (작게, 이모티콘 제거) ---
+st.markdown("### 2026 친환경차(전기차) 등재 현황")
 st.write("업체명과 모델명을 선택하여 제외 여부를 확인하세요.")
 
-# --- 값 포맷팅 함수 (소수점 1자리) ---
+# --- 2. 이미지 내용 추가 (기준표 정리) ---
+with st.expander("ℹ️ [참고] 전기자동차 에너지 소비효율 기준 보기", expanded=False):
+    st.markdown("**3. 전기자동차의 기준 (승용자동차)**")
+    
+    # 보기 편하게 행/열을 바꿔서(Transposed) 표 생성
+    ref_data = {
+        "구분 (차급)": ["초소·경·소형", "중형", "대형"],
+        "에너지 소비효율 (km/kWh)": ["5.0 이상", "4.2 이상", "3.4 이상"]
+    }
+    st.table(pd.DataFrame(ref_data))
+
+st.divider()
+
+# --- 값 포맷팅 함수 ---
 def format_value(val):
     if isinstance(val, float):
         return f"{val:.1f}"
@@ -82,7 +94,7 @@ else:
     with col2:
         selected_model = st.selectbox("2. 모델명 선택", ["선택하세요"] + models)
 
-    st.divider()
+    st.markdown("---") # 구분선
 
     # --- 결과 출력 ---
     if selected_brand != "선택하세요" and selected_model != "선택하세요":
@@ -103,14 +115,13 @@ else:
             else:
                 normal_rows.append(row)
 
-        # 공통: 테이블 HTML 생성 함수 (Index 제거 + 가운데 정렬)
+        # 공통: 테이블 HTML 생성 함수
         def make_html_table(rows):
             data_list = []
             for r in rows:
                 data_list.append([format_value(v) for v in r.iloc[2:8].tolist()])
             
             temp_df = pd.DataFrame(data_list, columns=headers)
-            # index=False로 "0" 표시 제거
             return temp_df.to_html(index=False, classes='table', escape=False)
 
         # 1. 제외된 차량
@@ -121,7 +132,6 @@ else:
                 ex_date = ex_val.strftime("%Y-%m-%d") if isinstance(ex_val, datetime.datetime) else str(ex_val).split(" ")[0]
                 
                 st.markdown(f"**🔻 제외 상세 정보 #{i+1} (제외일: {ex_date})**")
-                # HTML 테이블 렌더링
                 st.markdown(make_html_table([row]), unsafe_allow_html=True)
 
         # 2. 정상 차량
