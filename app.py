@@ -58,15 +58,34 @@ def format_value(val):
     if isinstance(val, datetime.datetime): return val.strftime("%Y-%m-%d")
     return val
 
-# --- ★ 핵심: 모델명 '과격한' 단순화 함수 ---
-def simplify_name(name):
+# --- ★ 핵심: 브랜드별 맞춤형 모델명 단순화 ---
+def simplify_name(name, brand):
     if not isinstance(name, str): return str(name)
     
-    # 1. 괄호 제거
-    name = re.sub(r'\(.*?\)', '', name)
+    # 1. 공통: 괄호 및 내용 제거
+    name = re.sub(r'\(.*?\)', '', name).strip()
+    upper_name = name.upper()
+
+    # 2. 브랜드별 네이밍 전략 적용
     
-    # 2. 불필요한 수식어 제거 (롱레인지, 4WD, 스탠다드 등)
-    #    목록을 계속 추가해서 걸러낼 수 있습니다.
+    # [전략 A] 독일 3사: 첫 단어가 곧 모델명 (파워트레인 제거)
+    # 예: "i4 eDrive40" -> "i4", "EQE 350+" -> "EQE"
+    if brand in ["BMW", "메르세데스벤츠", "Audi", "폭스바겐", "볼보"]:
+        # 공백으로 쪼개서 첫 번째 단어만 가져옴
+        first_word = upper_name.split()[0]
+        # 예외처리: Audi e-tron 같은 경우 유지, Q4 e-tron은 Q4로? 
+        # 아우디는 'Q4', 'e-tron', 'Q8' 등으로 나뉨. 첫단어가 가장 깔끔함.
+        return first_word
+
+    # [전략 B] 테슬라: "Model" + "X" 까지 가져옴
+    if brand == "테슬라":
+        if upper_name.startswith("MODEL"):
+            parts = upper_name.split()
+            if len(parts) >= 2:
+                return f"{parts[0]} {parts[1]}" # MODEL 3, MODEL Y
+        return upper_name
+
+    # [전략 C] 국산차 및 기타: 불필요한 수식어 제거
     remove_words = [
         "LONG RANGE", "LONGRANGE", "STANDARD", "PERFORMANCE", 
         "2WD", "4WD", "AWD", "RWD", "FWD", 
@@ -74,28 +93,16 @@ def simplify_name(name):
         "THE NEW", "ALL NEW", "PE", "ELECTRIC", "EV"
     ]
     
-    upper_name = name.upper()
     for word in remove_words:
-        # 단어 단위로 정확히 일치할 때만 제거 (EV6의 EV는 지우면 안됨)
-        # 단순히 replace하면 EV6 -> 6이 되어버리므로 주의
         if word == "EV": 
-            # EV는 단독으로 쓰일 때만 제거 (NIRO EV -> NIRO)
+            # EV는 단독 단어일 때만 제거 (NIRO EV -> NIRO)
             upper_name = re.sub(r'\bEV\b', '', upper_name)
         else:
             upper_name = upper_name.replace(word, "")
             
-    # 3. 공백 및 특수문자 정리
     clean_name = upper_name.strip()
-    
-    # 4. 너무 짧아졌거나 이상하면 원본 앞단어만 사용 (안전장치)
-    if len(clean_name) < 2:
-        return name.split()[0]
-        
+    if len(clean_name) < 2: return name.split()[0]
     return clean_name.strip()
-
-# 검색용 키워드 생성 (공백 제거 버전)
-def make_search_key(name):
-    return simplify_name(name).replace(" ", "")
 
 # --- 데이터 로드 ---
 @st.cache_data
@@ -114,9 +121,7 @@ def load_data():
     if file_to_load:
         try:
             df = pd.read_excel(file_to_load, sheet_name=sheet_name)
-            # 검색용 단순화된 이름 컬럼 미리 생성
-            df['단순_모델명'] = df.iloc[:, 1].astype(str).apply(simplify_name)
-            df['검색_키'] = df['단순_모델명'].str.replace(" ", "")
+            # 여기서는 원본만 로드하고, 단순화는 선택된 브랜드에 따라 실시간으로 처리
             return df
         except: return None
     return None
@@ -139,100 +144,115 @@ else:
 
     col1, col2 = st.columns(2)
     with col1:
+        # 브랜드 선택 (기본값: 선택하세요)
         selected_brand = st.selectbox("1. 업체명 선택", ["선택하세요"] + sorted_brands)
     
     display_models = []
+    
+    # [UX 개선] 업체 선택 시 모델명 리스트 즉시 생성
     if selected_brand != "선택하세요":
         brand_df = df[df.iloc[:, 0] == selected_brand]
         
-        # (단순화된 이름, 원본 이름) 추출
-        pairs = brand_df[['단순_모델명', brand_df.columns[1]]].values.tolist()
+        # (단순화된 이름, 원본 이름) 추출 -> 이때 브랜드를 넘겨줌
+        pairs = []
+        for idx, row in brand_df.iterrows():
+            orig_name = str(row.iloc[1])
+            simple = simplify_name(orig_name, selected_brand) # 브랜드별 로직 적용
+            pairs.append((simple, orig_name))
         
-        # ★ 상용차 필터링 로직 (이름으로 판단)
         filtered_models = set()
-        
         for simple_name, orig_name in pairs:
             orig_str = str(orig_name)
+            # 상용차 필터
+            if selected_brand == "현대자동차" and ("포터" in orig_str or "ST1" in orig_str): continue
+            if selected_brand == "기아" and ("봉고" in orig_str): continue
             
-            # 현대: 포터, ST1 제거
-            if selected_brand == "현대자동차":
-                if "포터" in orig_str or "ST1" in orig_str: continue
-            
-            # 기아: 봉고 제거
-            elif selected_brand == "기아":
-                if "봉고" in orig_str: continue
-            
-            # 필터 통과한 것만 추가
             filtered_models.add(simple_name)
         
-        # 오름차순 정렬 (ㄱ -> ㅎ)
+        # 오름차순 정렬
         display_models = sorted(list(filtered_models))
     
     with col2:
-        selected_display_model = st.selectbox("2. 모델명 선택", ["선택하세요"] + display_models)
+        # [UX 개선] 모델명 선택 박스에서 "선택하세요" 제거
+        # 업체가 선택되었다면 바로 모델 리스트를 보여줌 (첫 번째 모델 자동 선택)
+        if selected_brand == "선택하세요":
+            st.selectbox("2. 모델명 선택", ["업체를 먼저 선택하세요"], disabled=True)
+            selected_display_model = None
+        else:
+            if display_models:
+                selected_display_model = st.selectbox("2. 모델명 선택", display_models)
+            else:
+                st.selectbox("2. 모델명 선택", ["표시할 모델이 없습니다"], disabled=True)
+                selected_display_model = None
 
     st.markdown("---") 
 
-    if selected_brand != "선택하세요" and selected_display_model != "선택하세요":
+    # --- 결과 출력 ---
+    if selected_brand != "선택하세요" and selected_display_model:
         
-        # 선택된 '단순 모델명'을 가진 모든 원본 차량 검색
-        # 예: 선택은 'IONIQ 5' -> 검색 결과는 'IONIQ 5 Long Range', 'IONIQ 5 Standard' 모두 포함
-        search_key_selected = selected_display_model.replace(" ", "")
+        # 선택된 단순 모델명에 해당하는 '모든 원본 모델' 찾기
+        brand_df = df[df.iloc[:, 0] == selected_brand]
+        target_rows = []
         
-        target_rows = df[
-            (df.iloc[:, 0] == selected_brand) & 
-            (df['검색_키'] == search_key_selected)
-        ]
+        for idx, row in brand_df.iterrows():
+            orig_name = str(row.iloc[1])
+            # 현재 선택된 브랜드의 로직으로 이름을 단순화해서 비교
+            if simplify_name(orig_name, selected_brand) == selected_display_model:
+                target_rows.append(row)
         
-        headers = df.columns[2:8].tolist()
-        excluded_rows = [] 
-        normal_rows = []
-
-        for _, row in target_rows.iterrows():
-            exclusion_value = row.iloc[8]
-            if pd.notna(exclusion_value) and str(exclusion_value).strip() != "":
-                excluded_rows.append(row)
-            else:
-                normal_rows.append(row)
-
-        def make_one_line_html(row):
-            items = []
-            vals = row.iloc[2:8].tolist()
-            original_model_name = row.iloc[1]
+        # DataFrame으로 변환
+        if target_rows:
+            target_df = pd.DataFrame(target_rows)
             
-            items.append(f"<span class='info-header' style='color:#000;'>모델:</span> <b>{original_model_name}</b>")
+            headers = df.columns[2:8].tolist()
+            excluded_rows = [] 
+            normal_rows = []
 
-            for h, v in zip(headers, vals):
-                if isinstance(v, datetime.datetime):
-                    v_str = v.strftime("%Y-%m-%d")
+            for _, row in target_df.iterrows():
+                exclusion_value = row.iloc[8]
+                if pd.notna(exclusion_value) and str(exclusion_value).strip() != "":
+                    excluded_rows.append(row)
                 else:
-                    v_str = format_value(v)
+                    normal_rows.append(row)
+
+            def make_one_line_html(row):
+                items = []
+                vals = row.iloc[2:8].tolist()
+                original_model_name = row.iloc[1]
                 
-                if any(keyword in str(h) for keyword in ['연비', '효율', 'km']):
-                     items.append(f"<span class='info-header'>{h}:</span> <span class='highlight-efficiency'>{v_str}</span>")
-                else:
-                     items.append(f"<span class='info-header'>{h}:</span> {v_str}")
-            
-            full_str = "<span class='separator'> | </span>".join(items)
-            return f"<div class='info-box'>{full_str}</div>"
+                items.append(f"<span class='info-header' style='color:#000;'>모델:</span> <b>{original_model_name}</b>")
 
-        # 1. 제외된 차량
-        if excluded_rows:
-            st.error(f"📉 [기준 미달/제외] - {len(excluded_rows)}건")
-            for i, row in enumerate(excluded_rows):
-                ex_val = row.iloc[8]
-                ex_date = ex_val.strftime("%Y-%m-%d") if isinstance(ex_val, datetime.datetime) else str(ex_val).split(" ")[0]
+                for h, v in zip(headers, vals):
+                    if isinstance(v, datetime.datetime): v_str = v.strftime("%Y-%m-%d")
+                    else: v_str = format_value(v)
+                    
+                    if any(keyword in str(h) for keyword in ['연비', '효율', 'km']):
+                         items.append(f"<span class='info-header'>{h}:</span> <span class='highlight-efficiency'>{v_str}</span>")
+                    else:
+                         items.append(f"<span class='info-header'>{h}:</span> {v_str}")
                 
-                st.markdown(f"**🔻 제외 정보 #{i+1} (제외일: {ex_date})**")
-                st.markdown(make_one_line_html(row), unsafe_allow_html=True)
+                full_str = "<span class='separator'> | </span>".join(items)
+                return f"<div class='info-box'>{full_str}</div>"
 
-        # 2. 정상 차량
-        if normal_rows:
-            if excluded_rows: st.markdown("---")
-            st.success(f"✅ [기준 충족/정상] - {len(normal_rows)}건")
-            for i, row in enumerate(normal_rows):
-                st.markdown(f"**🔹 등재 상세 #{i+1}**")
-                st.markdown(make_one_line_html(row), unsafe_allow_html=True)
+            # 1. 제외된 차량
+            if excluded_rows:
+                st.error(f"📉 [기준 미달/제외] - {len(excluded_rows)}건")
+                for i, row in enumerate(excluded_rows):
+                    ex_val = row.iloc[8]
+                    ex_date = ex_val.strftime("%Y-%m-%d") if isinstance(ex_val, datetime.datetime) else str(ex_val).split(" ")[0]
+                    
+                    st.markdown(f"**🔻 제외 정보 #{i+1} (제외일: {ex_date})**")
+                    st.markdown(make_one_line_html(row), unsafe_allow_html=True)
 
-        if not excluded_rows and not normal_rows:
-            st.warning("데이터 오류")
+            # 2. 정상 차량
+            if normal_rows:
+                if excluded_rows: st.markdown("---")
+                st.success(f"✅ [기준 충족/정상] - {len(normal_rows)}건")
+                for i, row in enumerate(normal_rows):
+                    st.markdown(f"**🔹 등재 상세 #{i+1}**")
+                    st.markdown(make_one_line_html(row), unsafe_allow_html=True)
+
+            if not excluded_rows and not normal_rows:
+                st.warning("데이터 오류")
+        else:
+            st.warning("해당 모델 데이터를 찾을 수 없습니다.")
