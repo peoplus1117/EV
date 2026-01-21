@@ -5,7 +5,7 @@ import os
 import re
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="2026 친환경차 조회", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="2026 친환경차 조회", page_icon="⚡", layout="wide")
 
 # --- 스타일 설정 ---
 st.markdown("""
@@ -14,52 +14,62 @@ st.markdown("""
     .result-container {
         background-color: var(--secondary-background-color);
         padding: 15px;
-        border-radius: 10px;
+        border-radius: 8px;
         margin-bottom: 15px;
         border: 1px solid rgba(128, 128, 128, 0.2);
     }
     
-    /* 개별 차량 정보 한 줄 스타일 */
+    /* 반응형 레이아웃 */
     .car-info-line {
+        display: flex;
+        flex-wrap: wrap;            
+        align-items: center;        
+        gap: 8px 15px;              
         font-size: 15px;
-        line-height: 1.8;
-        margin-bottom: 8px;
-        padding-bottom: 8px;
+        padding: 8px 0;
         border-bottom: 1px dashed rgba(128, 128, 128, 0.3);
+        line-height: 1.6;
     }
+
     .car-info-line:last-child {
         border-bottom: none;
-        margin-bottom: 0;
-        padding-bottom: 0;
     }
 
-    /* 항목 제목 (모델, 연비 등) */
+    .info-item {
+        white-space: nowrap;        
+        display: inline-flex;
+        align-items: center;
+    }
+
+    /* [수정] 항목 제목: 볼드 제거 */
     .label {
-        font-weight: bold;
-        color: var(--primary-color); /* 테마 포인트 컬러 사용 */
+        font-weight: normal;  /* 볼드 아님 */
+        color: var(--primary-color);
         margin-right: 4px;
+        font-size: 0.9em;
     }
 
-    /* 모델명 강조 */
+    /* [수정] 모델명: 유일하게 볼드 유지 */
     .model-name {
-        font-weight: bold;
-        color: var(--text-color); /* 테마에 따라 흰색/검정 자동 */
+        font-weight: bold;    /* ★ 여기만 볼드 */
+        color: var(--text-color);
         font-size: 1.05em;
+        margin-right: 5px;
     }
 
-    /* 연비 강조 (형광펜) */
+    /* [수정] 연비 강조: 볼드 제거, 색상만 유지 */
     .highlight {
         background-color: rgba(255, 255, 0, 0.2);
-        color: #d32f2f; /* 빨강 */
-        font-weight: bold;
-        padding: 2px 4px;
-        border-radius: 4px;
+        color: #ff4b4b;
+        font-weight: normal;  /* 볼드 아님 */
+        padding: 1px 4px;
+        border-radius: 3px;
     }
-
-    /* 구분자 */
-    .sep {
-        opacity: 0.4;
-        margin: 0 8px;
+    
+    /* 일반 값 */
+    .value-text {
+        color: var(--text-color);
+        font-weight: normal;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -81,6 +91,15 @@ def format_value(val):
     if isinstance(val, float): return f"{val:.1f}"
     if isinstance(val, datetime.datetime): return val.strftime("%Y-%m-%d")
     return val
+
+def shorten_header(header):
+    if "에너지소비효율" in header: return "효율"
+    if "1회충전주행거리" in header: return "주행"
+    if "정격전압" in header: return "배터리"
+    if "타이어" in header: return "타이어"
+    if "구동방식" in header: return "구동"
+    if "적용일자" in header: return "적용일"
+    return header
 
 def get_core_model_name(original_name, brand):
     if not isinstance(original_name, str): return str(original_name)
@@ -104,7 +123,6 @@ def get_core_model_name(original_name, brand):
              if match: return "아이오닉" + re.sub(r'[^0-9]', '', match.group(1))
         match_g = re.search(r'(GV\d+|G\d+)', name)
         if match_g: return match_g.group(1)
-        
         for k in ["KONA", "코나", "NIRO", "니로", "RAY", "레이", "CASPER", "캐스퍼"]:
              if k in name: return k
 
@@ -124,14 +142,14 @@ def get_core_model_name(original_name, brand):
             if idx + 1 < len(parts): return f"MODEL {parts[idx+1]}"
         except: pass
 
-    if brand == "폭스바겐" and "ID." in name: return name.split()[0]
-    
     if brand == "폴스타" and "POLESTAR" in name:
         parts = name.split()
         try:
              idx = parts.index("POLESTAR")
              if idx+1 < len(parts): return f"POLESTAR {parts[idx+1]}"
         except: pass
+
+    if brand == "폭스바겐" and "ID." in name: return name.split()[0]
 
     remove_suffixes = ["LONG RANGE", "LONGRANGE", "STANDARD", "PERFORMANCE", "2WD", "4WD", "AWD", "RWD", "FWD", "GT-LINE", "GT", "PRO", "PRIME"]
     for w in remove_suffixes: name = name.replace(w, "")
@@ -195,71 +213,58 @@ else:
         if target_rows:
             target_df = pd.DataFrame(target_rows)
             headers = df.columns[2:8].tolist()
-
-            # 제외 여부 컬럼 추가 (I열)
             target_df['제외일자_raw'] = target_df.iloc[:, 8]
             
-            # --- 제외된 차량 (그룹핑) ---
-            # 제외일자가 있는 행만 필터링
             excluded_df = target_df[target_df['제외일자_raw'].notna() & (target_df['제외일자_raw'].astype(str).str.strip() != "")]
-            
-            # --- 정상 차량 ---
             normal_df = target_df[~target_df.index.isin(excluded_df.index)]
 
-            # HTML 생성 함수 (완벽한 한 줄)
             def make_html_line(row):
                 orig_name = row.iloc[1]
+                display_name = orig_name.replace("The New", "").replace("Mercedes-Benz", "").strip()
                 vals = row.iloc[2:8].tolist()
                 
                 parts = []
-                # 1. 모델명
-                parts.append(f"<span class='label'>모델:</span><span class='model-name'>{orig_name}</span>")
+                # 모델명 (볼드)
+                parts.append(f"<div class='info-item'><span class='label'>모델:</span><span class='model-name'>{display_name}</span></div>")
                 
-                # 2. 나머지 스펙
                 for h, v in zip(headers, vals):
                     val_str = v.strftime("%Y-%m-%d") if isinstance(v, datetime.datetime) else format_value(v)
-                    # 연비 강조
-                    if any(k in str(h) for k in ['연비', '효율', 'km']):
-                        parts.append(f"<span class='label'>{h}:</span><span class='highlight'>{val_str}</span>")
+                    short_h = shorten_header(h)
+                    
+                    if "효율" in short_h or "주행" in short_h:
+                        # 강조 값 (볼드 아님)
+                        parts.append(f"<div class='info-item'><span class='label'>{short_h}:</span><span class='highlight'>{val_str}</span></div>")
                     else:
-                        parts.append(f"<span class='label'>{h}:</span>{val_str}")
+                        # 일반 값 (볼드 아님)
+                        parts.append(f"<div class='info-item'><span class='label'>{short_h}:</span><span class='value-text'>{val_str}</span></div>")
                 
-                return "<div class='car-info-line'>" + "<span class='sep'> / </span>".join(parts) + "</div>"
+                return "<div class='car-info-line'>" + "".join(parts) + "</div>"
 
-            # 1. 제외된 차량 출력 (날짜별 그룹핑)
+            # 1. 제외된 차량
             if not excluded_df.empty:
-                # 날짜 포맷 통일해서 새로운 컬럼 생성
                 excluded_df['제외일_str'] = excluded_df['제외일자_raw'].apply(
                     lambda x: x.strftime("%Y-%m-%d") if isinstance(x, datetime.datetime) else str(x).split(" ")[0]
                 )
-                
-                # 그룹핑
                 grouped = excluded_df.groupby('제외일_str')
                 
-                # 전체 건수 표시
                 st.error(f"📉 [기준 미달/제외] - 총 {len(excluded_df)}건")
-                
-                # 그룹별 출력
                 for date_str, group in grouped:
                     with st.container():
-                        st.markdown(f"**📅 제외일자: {date_str}** ({len(group)}대)")
-                        # 하나의 박스 안에 여러 차를 넣음
+                        st.markdown(f"**📅 제외일: {date_str}** ({len(group)}대)")
                         html_content = "<div class='result-container'>"
                         for _, row in group.iterrows():
                             html_content += make_html_line(row)
                         html_content += "</div>"
                         st.markdown(html_content, unsafe_allow_html=True)
 
-            # 2. 정상 차량 출력
+            # 2. 정상 차량
             if not normal_df.empty:
                 if not excluded_df.empty: st.markdown("---")
                 st.success(f"✅ [기준 충족/정상] - 총 {len(normal_df)}건")
-                
                 html_content = "<div class='result-container'>"
                 for _, row in normal_df.iterrows():
                     html_content += make_html_line(row)
                 html_content += "</div>"
                 st.markdown(html_content, unsafe_allow_html=True)
-            
         else:
             st.warning("데이터가 없습니다.")
