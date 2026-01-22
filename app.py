@@ -218,3 +218,145 @@ else:
     model_threshold_map = {} 
 
     if selected_brand != "선택하세요":
+        brand_df = df[df.iloc[:, 0] == selected_brand].copy()
+        
+        # 제외일자 컬럼 생성
+        brand_df['제외일자_raw'] = brand_df.iloc[:, 8]
+
+        # 모델명 추출
+        brand_df['Core_Model'] = brand_df.iloc[:, 1].apply(lambda x: get_core_model_name(str(x), selected_brand))
+        
+        # None 및 상용차 필터링
+        brand_df = brand_df.dropna(subset=['Core_Model'])
+        if selected_brand == "현대자동차":
+            brand_df = brand_df[~brand_df.iloc[:, 1].str.contains("포터|ST1")]
+        if selected_brand == "기아":
+            brand_df = brand_df[~brand_df.iloc[:, 1].str.contains("봉고")]
+            
+        display_models = sorted(list(brand_df['Core_Model'].unique()))
+
+    with col2:
+        if selected_brand == "선택하세요":
+            st.selectbox("2. 모델명 선택", ["업체를 먼저 선택하세요"], disabled=True)
+            selected_display_model = None
+        else:
+            model_options = ["전체 보기"] + display_models
+            selected_display_model = st.selectbox("2. 모델명 선택", model_options)
+
+    st.markdown("---") 
+
+    if selected_brand != "선택하세요":
+        if selected_display_model == "전체 보기":
+            target_df = brand_df
+        else:
+            target_df = brand_df[brand_df['Core_Model'] == selected_display_model]
+        
+        if not target_df.empty:
+            
+            # --- [수정] 차급 기준 계산 (대형차 강제 인식 추가) ---
+            # 연비가 좋아도 무조건 '대형'으로 인식해야 하는 모델 목록
+            forced_large_models = ["G80", "G90", "GV80", "EQS", "EV9", "I7", "X5", "Q8"]
+            
+            calc_df = brand_df 
+            
+            for model_name, group in calc_df.groupby('Core_Model'):
+                # 1. 강제 대형 리스트 확인
+                if model_name in forced_large_models:
+                     model_threshold_map[model_name] = ("대형", 3.4)
+                     continue # 강제 지정했으므로 연비 계산 스킵
+
+                # 2. 일반적인 연비 기반 추론
+                alive_mask = ~(group['제외일자_raw'].notna() & (group['제외일자_raw'].astype(str).str.strip() != ""))
+                alive_group = group[alive_mask]
+                
+                normal_effs = []
+                for _, row in alive_group.iterrows():
+                    for h, v in zip(headers, row.iloc[2:8].tolist()):
+                        if "효율" in str(h) or "연비" in str(h):
+                            try: normal_effs.append(float(v))
+                            except: pass
+                
+                c_name, c_th = "중형", 4.2
+                if normal_effs:
+                    min_eff = min(normal_effs)
+                    if min_eff < 4.2: c_name, c_th = "대형", 3.4
+                    elif min_eff < 5.0: c_name, c_th = "중형", 4.2
+                    else: c_name, c_th = "소형", 5.0
+                
+                model_threshold_map[model_name] = (c_name, c_th)
+
+            # 데이터 분리
+            excluded_mask = target_df['제외일자_raw'].notna() & (target_df['제외일자_raw'].astype(str).str.strip() != "")
+            excluded_df = target_df[excluded_mask]
+            normal_df = target_df[~excluded_mask]
+
+            def make_html_line(row, is_excluded):
+                core_model = row['Core_Model']
+                orig_name = row.iloc[1]
+                
+                display_name = str(orig_name)
+                for g in ["The New", "All New", "Mercedes-Benz", "MERCEDES-BENZ", "CHEVROLET", "Chevrolet", "Volvo", "VOLVO", "BYD"]:
+                    display_name = display_name.replace(g, "")
+                display_name = display_name.strip()
+                
+                vals = row.iloc[2:8].tolist()
+                
+                # 기준 가져오기
+                detected_class, detected_th = model_threshold_map.get(core_model, ("중형", 4.2))
+
+                parts = []
+                parts.append(f"<div class='info-item'><span class='label'>모델:</span><span class='model-name'>{display_name}</span></div>")
+                
+                my_eff = 0
+                for h, v in zip(headers, vals):
+                    val_str = v.strftime("%Y-%m-%d") if isinstance(v, datetime.datetime) else format_value(v)
+                    short_h = shorten_header(h)
+                    
+                    if "효율" in short_h or "주행" in short_h:
+                        parts.append(f"<div class='info-item'><span class='label'>{short_h}:</span><span class='highlight'>{val_str}</span></div>")
+                        if "효율" in short_h: 
+                            try: my_eff = float(v)
+                            except: pass
+                    else:
+                        parts.append(f"<div class='info-item'><span class='label'>{short_h}:</span><span class='value-text'>{val_str}</span></div>")
+                
+                badge = ""
+                if is_excluded:
+                    if my_eff < 3.4: badge = "<span class='grade-badge-fail'>대형(3.4) 미달</span>"
+                    elif 3.4 <= my_eff < 4.2: badge = "<span class='grade-badge-fail'>중형(4.2) 미달</span>"
+                    elif 4.2 <= my_eff < 5.0: badge = "<span class='grade-badge-fail'>소형(5.0) 미달</span>"
+                    else: badge = "<span class='grade-badge-fail'>기준 미달</span>"
+                else:
+                    badge = f"<span class='grade-badge-pass'>{detected_class}({detected_th}) 충족</span>"
+
+                if badge: parts.append(f"<div class='info-item'>{badge}</div>")
+                return "<div class='car-info-line'>" + "".join(parts) + "</div>"
+
+            # 1. 제외된 차량
+            if not excluded_df.empty:
+                excluded_df['제외일_str'] = excluded_df['제외일자_raw'].apply(
+                    lambda x: x.strftime("%Y-%m-%d") if isinstance(x, datetime.datetime) else str(x).split(" ")[0]
+                )
+                
+                st.error(f"📉 [기준 미달/제외] - 총 {len(excluded_df)}건")
+                for date_str, group in excluded_df.groupby('제외일_str'):
+                    with st.container():
+                        st.markdown(f"**📅 제외일: {date_str}** ({len(group)}대)")
+                        html_content = "<div class='result-container'>"
+                        for _, row in group.iterrows():
+                            html_content += make_html_line(row, is_excluded=True)
+                        html_content += "</div>"
+                        st.markdown(html_content, unsafe_allow_html=True)
+
+            # 2. 정상 차량
+            if not normal_df.empty:
+                if not excluded_df.empty: st.markdown("---")
+                st.success(f"✅ [기준 충족/정상] - 총 {len(normal_df)}건")
+                html_content = "<div class='result-container'>"
+                for _, row in normal_df.iterrows():
+                    html_content += make_html_line(row, is_excluded=False)
+                html_content += "</div>"
+                st.markdown(html_content, unsafe_allow_html=True)
+
+        else:
+            st.warning("데이터가 없습니다.")
