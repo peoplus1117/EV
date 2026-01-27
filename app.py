@@ -118,8 +118,7 @@ def shorten_header(header):
     if "적용일자" in header: return "적용일"
     return header
 
-# --- [핵심] 주요 전기차 축거(휠베이스) 데이터 베이스 ---
-# 사용자가 직접 인터넷 찾으라고 하셔서, 제가 미리 찾아서 심어두었습니다.
+# --- 주요 전기차 축거(휠베이스) 데이터 베이스 ---
 def get_car_wheelbase(full_name_raw):
     name = str(full_name_raw).upper().replace(" ", "")
     
@@ -127,8 +126,8 @@ def get_car_wheelbase(full_name_raw):
     if "G80" in name: return 3010
     if "GV60" in name: return 2900
     if "GV70" in name: return 2875
-    if "G90" in name: return 3180 # LWB는 더 길지만 기본형 기준
-    if "GV80" in name: return 2955 # 전동화가 없지만 혹시 몰라 추가
+    if "G90" in name: return 3180
+    if "GV80" in name: return 2955
     
     # 2. 현대
     if "IONIQ5" in name or "아이오닉5" in name: return 3000
@@ -139,7 +138,7 @@ def get_car_wheelbase(full_name_raw):
     if "ST1" in name: return 3500
     
     # 3. 기아
-    if "EV9" in name: return 3100 # 대형 확정
+    if "EV9" in name: return 3100
     if "EV6" in name: return 2900
     if "EV3" in name: return 2680
     if "NIRO" in name or "니로" in name: return 2720
@@ -152,17 +151,16 @@ def get_car_wheelbase(full_name_raw):
     if "MODEL3" in name: return 2875
     if "MODELY" in name: return 2890
     
-    # 5. 벤츠 (EQE, EQS 구분 중요)
+    # 5. 벤츠
     if "EQE" in name:
-        if "SUV" in name: return 3030 # EQE SUV (중형)
-        return 3120 # EQE Sedan (대형)
-    if "EQS" in name:
-        return 3210 # Sedan/SUV 동일하게 3210 (초대형)
+        if "SUV" in name: return 3030
+        return 3120
+    if "EQS" in name: return 3210
     if "EQA" in name: return 2729
     if "EQB" in name: return 2829
     
     # 6. BMW
-    if "I7" in name: return 3215 # 대형 확정
+    if "I7" in name: return 3215
     if "I5" in name: return 2995
     if "I4" in name: return 2856
     if "IX1" in name: return 2692
@@ -186,7 +184,7 @@ def get_car_wheelbase(full_name_raw):
     if "SEAL" in name: return 2920
     if "ATTO" in name: return 2720
     
-    return None # 데이터 없음
+    return None
 
 # --- 모델명 클렌징 로직 ---
 def get_core_model_name(original_name, brand):
@@ -204,6 +202,7 @@ def get_core_model_name(original_name, brand):
         match = re.search(r'(EQ[A-Z])', name)
         if match: return match.group(1)
         return name.split()[0]
+    
     if brand in ["기아", "현대자동차", "제네시스"]:
         if "EV" in name:
              match = re.search(r'(EV\s?\d+)', name)
@@ -213,26 +212,33 @@ def get_core_model_name(original_name, brand):
              if match: return "아이오닉" + re.sub(r'[^0-9]', '', match.group(1))
         match_g = re.search(r'(GV\d+|G\d+)', name)
         if match_g: return match_g.group(1)
-        for k in ["KONA", "코나", "NIRO", "니로", "RAY", "레이", "CASPER", "캐스퍼"]: if k in name: return k
+        # [수정] for문 줄바꿈 처리하여 문법 에러 해결
+        for k in ["KONA", "코나", "NIRO", "니로", "RAY", "레이", "CASPER", "캐스퍼"]: 
+            if k in name: return k
+
     if brand == "BMW":
         first = name.split()[0]
         if first.startswith("I"): return first
+        
     if brand in ["Audi", "아우디"]:
         if "Q4" in name: return "Q4 e-tron"
         if "Q8" in name: return "Q8 e-tron"
         if name.startswith("E-TRON"): return "e-tron"
+        
     if brand == "테슬라" and "MODEL" in name:
         parts = name.split()
         try:
             idx = parts.index("MODEL")
             if idx + 1 < len(parts): return f"MODEL {parts[idx+1]}"
         except: pass
+        
     if brand == "폴스타" and "POLESTAR" in name:
         parts = name.split()
         try:
              idx = parts.index("POLESTAR")
              if idx+1 < len(parts): return f"POLESTAR {parts[idx+1]}"
         except: pass
+        
     if brand == "폭스바겐" and "ID." in name: return name.split()[0]
 
     remove_suffixes = ["LONG RANGE", "LONGRANGE", "STANDARD", "PERFORMANCE", "2WD", "4WD", "AWD", "RWD", "FWD", "GT-LINE", "GT", "PRO", "PRIME", "EUV", "EV"]
@@ -375,7 +381,7 @@ else:
                     if my_eff < 3.4: badge = "<span class='grade-badge-fail'>대형(3.4) 미달</span>"
                     elif 3.4 <= my_eff < 4.2:
                         if detected_th == 3.4: # 대형 기준 적용받는 차라면
-                             badge = "<span class='grade-badge-pass'>대형(3.4) 충족 (제외됨?)</span>" # 이론상 있을 수 없음
+                             badge = "<span class='grade-badge-pass'>대형(3.4) 충족 (제외됨?)</span>" 
                         else:
                              badge = "<span class='grade-badge-fail'>중형(4.2) 미달</span>"
                     elif 4.2 <= my_eff < 5.0: badge = "<span class='grade-badge-fail'>소형(5.0) 미달</span>"
